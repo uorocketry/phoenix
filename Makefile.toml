@@ -19,9 +19,6 @@ dependencies = [
 
 [tasks.test-device]
 dependencies = [
-    "test-temperature-board",
-    "test-pressure-board",
-    "test-strain-board",
     "test-common-arm",
 ]
 

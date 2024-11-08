@@ -1,4 +1,4 @@
-# ARGUS 
+# Phoenix 
 uORocketry's rocket instrumentation system. 
 
 ## Setup and Building 
@@ -18,7 +18,6 @@ uORocketry's rocket instrumentation system.
 
 ## Tests 
 - To run device tests `cargo make test-device` 
-- - `cargo make test-temperature-board`
 - To run host tests `cargo make test-host` 
 
 ## Helpful VSCode Extensions 
