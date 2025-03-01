@@ -50,6 +50,7 @@ features = ["print-defmt"]
 
 [workspace.dependencies.defmt] 
 version = "0.3.2"
+features = ["encoding-rzcobs"]
 
 [workspace.dependencies.fdcan]
 version = "0.2"
@@ -72,3 +73,6 @@ git = "https://github.com/uorocketry/messages"
 
 [workspace.dependencies.defmt-test]
 version = "0.3.2"
+
+[workspace.dependencies.madgwick]
+version = "0.1.1"
