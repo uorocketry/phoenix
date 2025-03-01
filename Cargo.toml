@@ -50,7 +50,6 @@ features = ["print-defmt"]
 
 [workspace.dependencies.defmt] 
 version = "0.3.2"
-features = ["encoding-rzcobs"]
 
 [workspace.dependencies.fdcan]
 version = "0.2"
