@@ -10,6 +10,7 @@ pub struct DataManager {
     pub ekf_nav_2: Option<Message>,
     pub ekf_nav_acc: Option<Message>,
     pub ekf_quat: Option<Message>,
+    pub madgwick_quat: Option<Message>,
     pub imu_1: Option<Message>,
     pub imu_2: Option<Message>,
     pub utc_time: Option<Message>,
@@ -33,6 +34,7 @@ impl DataManager {
             ekf_nav_2: None,
             ekf_nav_acc: None,
             ekf_quat: None,
+            madgwick_quat: None,
             imu_1: None,
             imu_2: None,
             utc_time: None,
@@ -60,13 +62,14 @@ impl DataManager {
     }
 
     /// Do not clone instead take to reduce CPU load.
-    pub fn take_sensors(&mut self) -> [Option<Message>; 15] {
+    pub fn take_sensors(&mut self) -> [Option<Message>; 16] {
         [
             self.air.take(),
             self.ekf_nav_1.take(),
             self.ekf_nav_2.take(),
             self.ekf_nav_acc.take(),
             self.ekf_quat.take(),
+            self.madgwick_quat.take(),
             self.imu_1.take(),
             self.imu_2.take(),
             self.utc_time.take(),
@@ -176,6 +179,9 @@ impl DataManager {
             // },
             _ => {}
         }
+    }
+    pub fn store_madgwick_result(&mut self, result: Message) {
+        self.madgwick_quat = Some(result);
     }
 }
 
