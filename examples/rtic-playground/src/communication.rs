@@ -43,19 +43,17 @@ impl CanCommandManager {
         self.can.transmit(header, payload)?;
         Ok(())
     }
-    pub fn process_data(&mut self) -> Result<Message, HydraError> {
+    pub fn process_data(&mut self, data_manager: &mut DataManager) -> Result<(), HydraError> {
         let mut buf = [0u8; 64];
-        if self.can.receive0(&mut buf).is_ok() {
+        while self.can.receive0(&mut buf).is_ok() {
             if let Ok(data) = from_bytes::<Message>(&buf) {
                 info!("Received message {}", data.clone());
-                crate::app::send_gs::spawn(data.clone()).ok();
-                return Ok(data);
-            } else if let Err(e) = from_bytes::<Message>(&buf) {
-                info!("Error: {:?}", e);
+                data_manager.handle_command(data)?;
+            } else {
+                info!("Error: {:?}", from_bytes::<Message>(&buf).unwrap_err());
             }
         }
-        self.can.clear_interrupt(fdcan::interrupt::Interrupt::RxFifo0NewMsg);
-        Err(HydraError::NotAvailable)  // assuming we have a NotAvailable variant or similar
+        Ok(())
     }
 }
 
