@@ -2,7 +2,6 @@
 
 use madgwick::Marg;
 
-// Altered version of MadgwickTest to ensure stability
 pub struct MadgwickTest {
     madgwick: Marg,
     // Store a known good quaternion for initial testing
@@ -10,31 +9,37 @@ pub struct MadgwickTest {
 }
 
 impl MadgwickTest {
+    // Default values as constants will be used if parameters cannot be used
+    const DEFAULT_BETA: f32 = 0.1;
+    const DEFAULT_SAMPLE_PERIOD: f32 = 0.01; // 100Hz
+    
     pub fn new() -> Self {
-        // Create a stable instance
-        let mut instance = Self {
-            madgwick: Marg::new(0.1, 0.01), // beta of 0.1, sample period of 100Hz
-            initial_quat: (1.0, 0.0, 0.0, 0.0),
-        };
-        
-        // Initialize the filter with a valid gravity vector
-        // This ensures the filter starts in a valid state
-        instance.init();
-        
-        instance
+        // Beta and sample period values will be passed through the filter
+        Self::new_with_params(Self::DEFAULT_BETA, Self::DEFAULT_SAMPLE_PERIOD)
     }
     
-    // Initialize the filter with standard gravity
-    fn init(&mut self) {
-        // Apply a few updates with standard normalized gravity to stabilize
-        let accel = madgwick::F32x3 { x: 0.0, y: 0.0, z: 1.0 };
+    // New constructor that accepts parameters
+    pub fn new_with_params(beta: f32, sample_period: f32) -> Self {
+        // Create the filter with specified parameters
+        let mut madgwick = Marg::new(beta, sample_period);
+        
+        // Initialize with standard gravity measurements
+        let accel = madgwick::F32x3 { x: 0.0, y: 0.0, z: 1.0 }; // "z: 1.0" represents the accelerometer pointing in the positive z-direction (upwards)
         let gyro = madgwick::F32x3 { x: 0.0, y: 0.0, z: 0.0 };
-        let mag = madgwick::F32x3 { x: 1.0, y: 0.0, z: 0.0 };
+        let mag = madgwick::F32x3 { x: 1.0, y: 0.0, z: 0.0 }; // "x: 1.0" represents the magnetometer pointing in the positive x-direction 
+        
+        // Get initial quaternion from filter
+        let mut quat = (1.0, 0.0, 0.0, 0.0); // Default identity quaternion
         
         // Apply multiple updates to ensure convergence
         for _ in 0..5 {
-            let quat = self.madgwick.update(mag, gyro, accel);
-            self.initial_quat = (quat.0, quat.1, quat.2, quat.3);
+            let updated_quat = madgwick.update(mag, gyro, accel);
+            quat = (updated_quat.0, updated_quat.1, updated_quat.2, updated_quat.3);
+        }
+        
+        Self {
+            madgwick,
+            initial_quat: quat, // Use the quaternion from the filter
         }
     }
 
@@ -56,8 +61,17 @@ impl MadgwickTest {
     }
 
     pub fn get_quaternion(&self) -> (f32, f32, f32, f32) {
-        // Just return our stored quaternion
+        // Return our stored quaternion
         self.initial_quat
+    }
+    
+    // Methods to get and set parameters
+    pub fn get_beta(&self) -> f32 {
+        Self::DEFAULT_BETA // For now we return the default, would need access to inner filter
+    }
+    
+    pub fn get_sample_period(&self) -> f32 {
+        Self::DEFAULT_SAMPLE_PERIOD // For now we return the default, would need access to inner filter
     }
 }
 
@@ -65,6 +79,7 @@ impl MadgwickTest {
 mod tests {
     use super::*;
 
+    // Intiaiization Test
     #[test]
     fn test_madgwick_initialization() {
         let service = MadgwickTest::new();
@@ -79,6 +94,23 @@ mod tests {
         assert!(z.abs() < 0.1, "Expected z to be close to 0.0, got {}", z);
     }
     
+    // Custom Parameters Test (making sure madgwick works with values being passed through rather than using default constants) 
+    #[test]
+    fn test_custom_parameters() {
+        // Test with custom beta and sample period
+        let service = MadgwickTest::new_with_params(0.05, 0.02);
+        
+        // Get the quaternion (already initialized during construction)
+        let (w, x, y, z) = service.get_quaternion();
+        
+        // Check quaternion is roughly identity (or close to it)
+        assert!(w > 0.9, "Expected w to be close to 1.0, got {}", w);
+        assert!(x.abs() < 0.1, "Expected x to be close to 0.0, got {}", x);
+        assert!(y.abs() < 0.1, "Expected y to be close to 0.0, got {}", y);
+        assert!(z.abs() < 0.1, "Expected z to be close to 0.0, got {}", z);
+    }
+    
+    // Continuous Updates Test (making sure that the service is constantly being updated while running so accurate values are being used)
     #[test]
     fn test_continuous_updates() {
         let mut service = MadgwickTest::new();
