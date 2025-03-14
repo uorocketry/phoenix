@@ -13,35 +13,57 @@ pub struct MadgwickService {
 }
 
 impl MadgwickService {
+    // Default values as constants will be used if parameters cannot be used
+    const DEFAULT_BETA: f32 = 0.1;
+    const DEFAULT_SAMPLE_PERIOD: f32 = 0.01; // 100Hz
+
     pub fn new() -> Self {
-        let beta = 0.1;
-        let sample_period = 0.01; // 100Hz
-        
-        let mut instance = Self {
-            madgwick: Marg::new(beta, sample_period),
-            latest_quat: (1.0, 0.0, 0.0, 0.0), // Identity quaternion
-            beta,
-            sample_period,
-        };
-        
-        // Initialize the filter with standard gravity to ensure stability
-        instance.initialize();
-        
-        instance
+        // Use the version with parameters but provide defaults incase we can't get parameters for some reason
+        Self::new_with_params(Self::DEFAULT_BETA, Self::DEFAULT_SAMPLE_PERIOD)
     }
     
-    // Initialize the filter with standard gravity readings
+    // New constructor that accepts parameters
+    pub fn new_with_params(beta: f32, sample_period: f32) -> Self {
+        // Create the filter with specified parameters
+        let mut madgwick = Marg::new(beta, sample_period);
+        
+        // Initialize with standard measurements
+        let accel = madgwick::F32x3 { x: 0.0, y: 0.0, z: 1.0 }; // "z: 1.0" represents the accelerometer pointing in the positive z-direction (upwards)
+        let gyro = madgwick::F32x3 { x: 0.0, y: 0.0, z: 0.0 };
+        let mag = madgwick::F32x3 { x: 1.0, y: 0.0, z: 0.0 }; // "x: 1.0" represents the magnetometer pointing in the positive x-direction 
+        
+        // Get initial quaternion from filter
+        let mut quat = (1.0, 0.0, 0.0, 0.0); // Default identity quaternion with no rotation
+        
+        // Apply multiple updates to ensure convergence, and stores the resulting quaternion after each update
+        for _ in 0..5 {
+            let updated_quat = madgwick.update(mag, gyro, accel);
+            quat = (updated_quat.0, updated_quat.1, updated_quat.2, updated_quat.3);
+        }
+        
+        Self {
+            madgwick,
+            latest_quat: quat, // Use the quaternion from the filter
+            beta,
+            sample_period,
+        }
+    }
+    
+    // Re-initialize the filter with standard gravity readings
+    // This is mainly used when parameters are changed
     fn initialize(&mut self) {
         let accel = madgwick::F32x3 { x: 0.0, y: 0.0, z: 1.0 };
         let gyro = madgwick::F32x3 { x: 0.0, y: 0.0, z: 0.0 };
         let mag = madgwick::F32x3 { x: 1.0, y: 0.0, z: 0.0 };
         
+        // Apply multiple updates to ensure convergence
         for _ in 0..5 {
             let quat = self.madgwick.update(mag, gyro, accel);
             self.latest_quat = (quat.0, quat.1, quat.2, quat.3);
         }
     }
-
+    
+    // Method for processing incoming IMU data; returns a new Message with an updated quaternion from the filter
     pub fn process_imu_data(&mut self, data: &Message) -> Option<Message> {
         match &data.data {
             messages::Data::Sensor(sensor) => match &sensor.data {
@@ -105,5 +127,24 @@ impl MadgwickService {
         self.madgwick = Marg::new(self.beta, self.sample_period);
         
         self.initialize();
+    }
+    
+    // Method to set sample period
+    pub fn set_sample_period(&mut self, sample_period: f32) {
+        self.sample_period = sample_period;
+        
+        self.madgwick = Marg::new(self.beta, self.sample_period);
+        
+        self.initialize();
+    }
+    
+    // Method to get current beta value
+    pub fn get_beta(&self) -> f32 {
+        self.beta
+    }
+    
+    // Method to get current sample period
+    pub fn get_sample_period(&self) -> f32 {
+        self.sample_period
     }
 }
