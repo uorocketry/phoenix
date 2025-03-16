@@ -105,6 +105,15 @@ impl CanDataManager {
             .clear_interrupt(fdcan::interrupt::Interrupt::RxFifo0NewMsg);
         Ok(())
     }
+    pub fn receive_message(&mut self) -> Result<Option<Message>, HydraError> {
+        let mut buf = [0u8; 64];
+        if self.can.receive0(&mut buf).is_ok() {
+            if let Ok(data) = from_bytes::<Message>(&buf) {
+                return Ok(Some(data));
+            }
+        }
+        Ok(None)
+    }
 }
 
 pub struct RadioDevice {

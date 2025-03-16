@@ -13,7 +13,7 @@ rtic-monotonics = { workspace = true }
 common-arm = { path = "../crates/common-arm" }
 stm32h7xx-hal = { workspace = true }
 postcard = { workspace = true }
-defmt = { workspace = true }
+defmt = { workspace = true}
 fdcan = { workspace = true }
 embedded-alloc = {workspace = true}
 heapless = {workspace = true}
@@ -21,7 +21,8 @@ rtic-sync = { workspace = true }
 defmt-rtt = { workspace = true }
 panic-probe = { workspace = true }
 chrono = { workspace = true }
-messages = {workspace = true}
+messages = { workspace = true }
+madgwick = { workspace = true }
 
 [dev-dependencies]
 defmt-test = { workspace = true }

@@ -72,3 +72,6 @@ git = "https://github.com/uorocketry/messages"
 
 [workspace.dependencies.defmt-test]
 version = "0.3.2"
+
+[workspace.dependencies.madgwick]
+version = "0.1.1"

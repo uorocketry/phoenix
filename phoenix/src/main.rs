@@ -3,6 +3,7 @@
 
 mod communication;
 mod data_manager;
+mod madgwick_service;
 mod types;
 
 use chrono::NaiveDate;
@@ -52,6 +53,7 @@ mod app {
     #[shared]
     struct SharedResources {
         data_manager: DataManager,
+        madgwick_service: madgwick_service::MadgwickService,
         em: ErrorManager,
         // sd_manager: SdManager<
         //     stm32h7xx_hal::spi::Spi<stm32h7xx_hal::pac::SPI1, stm32h7xx_hal::spi::Enabled>,
@@ -292,6 +294,8 @@ mod app {
         /* Monotonic clock */
         Mono::start(core.SYST, 200_000_000);
 
+        let madgwick_service = madgwick_service::MadgwickService::new();
+
         let mut data_manager = DataManager::new();
         data_manager.set_reset_reason(reset);
         let em = ErrorManager::new();
@@ -306,6 +310,7 @@ mod app {
         (
             SharedResources {
                 data_manager,
+                madgwick_service,
                 em,
                 // sd_manager,
                 radio_manager,
@@ -500,15 +505,20 @@ mod app {
         });
     }
 
-    #[task( priority = 3, binds = FDCAN2_IT0, shared = [&em, can_data_manager, data_manager])]
+    #[task(priority = 3, binds = FDCAN2_IT0, shared = [&em, can_data_manager, data_manager, madgwick_service])]
     fn can_data(mut cx: can_data::Context) {
         cx.shared.can_data_manager.lock(|can| {
-            {
-                cx.shared.em.run(|| {
-                    can.process_data()?;
-                    Ok(())
-                })
+            while let Ok(Some(message)) = can.receive_message() {
+                // process IMU data through madgwick service
+                cx.shared.madgwick_service.lock(|madgwick| {
+                    if let Some(result) = madgwick.process_imu_data(&message) {
+                        cx.shared.data_manager.lock(|dm| {
+                            dm.store_madgwick_result(result);
+                        });
+                    }
+                });
             }
+            cx.shared.em.run(|| Ok(()))
         });
     }
 
