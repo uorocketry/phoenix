@@ -8,6 +8,10 @@
             "type": "probe-rs-debug",
             "request": "launch",
             "name": "Probe-rs Debug",
+            "preLaunchTask": "build",
+            "flashingConfig": {
+                "flashingEnabled": true
+            },
             "chip": "STM32H733VGTx",
             "coreConfigs": [
                 {
