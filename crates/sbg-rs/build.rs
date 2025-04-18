@@ -33,7 +33,7 @@ fn build_c_library() {
     // - cargo:rustc-link-search={path} tells cargo where to find the library
     // - cargo:rustc-link-lib=static={name} tells cargo to link the library as static
     // - cargo:rerun-if-changed={path} tells cargo to rerun the build script if the library changes
-    println!("cargo:rustc-link-search={}", dst.display());
+    println!("cargo:rustc-link-search={}", dst.join("lib").display());
     println!("cargo:rustc-link-lib=static={}", SBG_C_LIB_NAME);
     println!("cargo:rerun-if-changed={}", SBG_C_LIB_NAME);
 }

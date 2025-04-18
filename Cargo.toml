@@ -7,6 +7,12 @@ members = ["phoenix", "examples/*", "crates/*"]
 # compile errors if built directly.
 default-members = ["phoenix", "examples/*"]
 
+[profile.dev.package.sbg-rs]
+opt-level = 0
+
+[profile.release.package.sbg-rs]
+opt-level = 0
+
 [workspace.dependencies.stm32h7xx-hal]
 git = "https://github.com/uorocketry/stm32h7xx-hal"
 # We use 35 even though we have the 33. 
