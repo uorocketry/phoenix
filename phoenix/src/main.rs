@@ -4,6 +4,7 @@
 mod communication;
 mod data_manager;
 mod madgwick_service;
+mod sbg_manager;
 mod types;
 
 use chrono::NaiveDate;
@@ -587,4 +588,23 @@ mod app {
             sbg.set_low();
         });
     }
+
+    // These tasks are defined in sbg_manager but RTIC can only apply macros to definitions in the same module.
+    // Declaring these as extern allows us to decorate them with the appropriate macros.
+    // extern "Rust" {
+    //     // #[task(priority = 1, shared = [&em, sd_manager])]
+    //     // async fn sbg_sd_task(context: sbg_sd_task::Context, data: [u8; SBG_BUFFER_SIZE]);
+
+    //     #[task(priority = 3, binds = DMA1_STR1, shared = [&em, sbg_manager])]
+    //     fn sbg_dma(mut context: sbg_dma::Context);
+
+    //     #[task(priority = 2, shared = [data_manager])]
+    //     async fn sbg_handle_data(context: sbg_handle_data::Context, data: CallbackData);
+
+    //     #[task(priority = 1, shared = [&em, sbg_manager])]
+    //     async fn sbg_flush(context: sbg_flush::Context);
+
+    //     #[task(priority = 1, shared = [&em, sbg_manager])]
+    //     async fn sbg_write_data(context: sbg_write_data::Context, data: Vec<u8, SBG_BUFFER_SIZE>);
+    // }
 }
