@@ -15,6 +15,7 @@ stm32h7xx-hal = { workspace = true }
 postcard = { workspace = true }
 defmt = { workspace = true}
 fdcan = { workspace = true }
+sbg-rs = { path = "../crates/sbg-rs" }
 embedded-alloc = {workspace = true}
 heapless = {workspace = true}
 rtic-sync = { workspace = true }

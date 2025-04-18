@@ -1,0 +1,15 @@
+[package]
+name = "sbg-rs"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bitflags = { version = "2.9", features = ["serde"] }
+defmt = { workspace = true}
+heapless = { workspace = true }
+messages = { workspace = true }
+serde = { workspace = true }
+
+[build-dependencies]
+bindgen = "0.71"
+cmake = "0.1"
