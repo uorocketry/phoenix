@@ -4,6 +4,7 @@
 mod communication;
 mod data_manager;
 mod madgwick_service;
+mod sbg_manager;
 mod types;
 
 use chrono::NaiveDate;
@@ -17,19 +18,25 @@ use fdcan::{
     config::NominalBitTiming,
     filter::{StandardFilter, StandardFilterSlot},
 };
+use heapless::Vec;
+use messages::{CanMessage, RadioData, RadioMessage};
 use messages::command::RadioRate;
-use messages::{sensor, Data};
 use panic_probe as _;
 use rtic_monotonics::systick::prelude::*;
 use rtic_sync::{channel::*, make_channel};
-use stm32h7xx_hal::gpio::gpioa::{PA2, PA3};
+use sbg_manager::{SBGManager, sbg_dma, sbg_handle_data, sbg_flush, sbg_write_data, sbg_sd_task, sbg_get_time};
+use sbg_rs::{CallbackData, SBG_BUFFER_SIZE};
+use stm32h7xx_hal::dma::dma::StreamsTuple;
+use stm32h7xx_hal::gpio::gpioa::{PA2, PA3, PA4};
 use stm32h7xx_hal::gpio::gpiob::PB4;
 use stm32h7xx_hal::gpio::Speed;
 use stm32h7xx_hal::gpio::{Output, PushPull};
 use stm32h7xx_hal::prelude::*;
 use stm32h7xx_hal::rtc;
 use stm32h7xx_hal::{rcc, rcc::rec};
+use stm32h7xx_hal::spi;
 use types::COM_ID; // global logger
+
 
 const DATA_CHANNEL_CAPACITY: usize = 10;
 
@@ -45,9 +52,6 @@ fn panic() -> ! {
 #[rtic::app(device = stm32h7xx_hal::stm32, peripherals = true, dispatchers = [EXTI0, EXTI1, EXTI2, SPI3, SPI2])]
 mod app {
 
-    use messages::Message;
-    use stm32h7xx_hal::gpio::{Alternate, Pin};
-
     use super::*;
 
     #[shared]
@@ -55,11 +59,12 @@ mod app {
         data_manager: DataManager,
         madgwick_service: madgwick_service::MadgwickService,
         em: ErrorManager,
-        // sd_manager: SdManager<
-        //     stm32h7xx_hal::spi::Spi<stm32h7xx_hal::pac::SPI1, stm32h7xx_hal::spi::Enabled>,
-        //     PA4<Output<PushPull>>,
-        // >,
+        sd_manager: SdManager<
+            stm32h7xx_hal::spi::Spi<stm32h7xx_hal::pac::SPI1, stm32h7xx_hal::spi::Enabled>,
+            PA4<Output<PushPull>>,
+        >,
         radio_manager: RadioManager,
+        sbg_manager: SBGManager,
         can_command_manager: CanCommandManager,
         can_data_manager: CanDataManager,
         sbg_power: PB4<Output<PushPull>>,
@@ -79,7 +84,7 @@ mod app {
     #[init]
     fn init(ctx: init::Context) -> (SharedResources, LocalResources) {
         // channel setup
-        let (_s, r) = make_channel!(Message, DATA_CHANNEL_CAPACITY);
+        let (_s, r) = make_channel!(CanMessage, DATA_CHANNEL_CAPACITY);
 
         let core = ctx.core;
 
@@ -133,6 +138,7 @@ mod app {
         let gpioa = ctx.device.GPIOA.split(ccdr.peripheral.GPIOA);
         let gpiod = ctx.device.GPIOD.split(ccdr.peripheral.GPIOD);
         let gpiob = ctx.device.GPIOB.split(ccdr.peripheral.GPIOB);
+        let gpioe = ctx.device.GPIOE.split(ccdr.peripheral.GPIOE);
 
         let pins = gpiob.pb14.into_alternate();
         let mut c0 = ctx
@@ -232,25 +238,25 @@ mod app {
 
         let can_command_manager = CanCommandManager::new(can_command.into_normal());
 
-        // let spi_sd: stm32h7xx_hal::spi::Spi<
-        //     stm32h7xx_hal::stm32::SPI1,
-        //     stm32h7xx_hal::spi::Enabled,
-        //     u8,
-        // > = ctx.device.SPI1.spi(
-        //     (
-        //         gpioa.pa5.into_alternate::<5>(),
-        //         gpioa.pa6.into_alternate(),
-        //         gpioa.pa7.into_alternate(),
-        //     ),
-        //     spi::Config::new(spi::MODE_0),
-        //     16.MHz(),
-        //     ccdr.peripheral.SPI1,
-        //     &ccdr.clocks,
-        // );
+        let spi_sd: stm32h7xx_hal::spi::Spi<
+            stm32h7xx_hal::stm32::SPI1,
+            stm32h7xx_hal::spi::Enabled,
+            u8,
+        > = ctx.device.SPI1.spi(
+            (
+                gpioa.pa5.into_alternate::<5>(),
+                gpioa.pa6.into_alternate(),
+                gpioa.pa7.into_alternate(),
+            ),
+            spi::Config::new(spi::MODE_0),
+            16.MHz(),
+            ccdr.peripheral.SPI1,
+            &ccdr.clocks,
+        );
 
-        // let cs_sd = gpioa.pa4.into_push_pull_output();
+        let cs_sd = gpioa.pa4.into_push_pull_output();
 
-        // let sd_manager = SdManager::new(spi_sd, cs_sd);
+        let sd_manager = SdManager::new(spi_sd, cs_sd);
 
         // leds
         let led_red = gpioa.pa2.into_push_pull_output();
@@ -261,19 +267,25 @@ mod app {
         sbg_power.set_high();
 
         // UART for sbg
-        let tx: Pin<'D', 1, Alternate<8>> = gpiod.pd1.into_alternate();
-        let rx: Pin<'D', 0, Alternate<8>> = gpiod.pd0.into_alternate();
-
-        // let stream_tuple = StreamsTuple::new(ctx.device.DMA1, ccdr.peripheral.DMA1);
-        let uart_radio = ctx
+        let tx = gpioa.pa0.into_alternate();
+        let rx = gpioa.pa1.into_alternate();
+        let stream_tuple = StreamsTuple::new(ctx.device.DMA1, ccdr.peripheral.DMA1);
+        let uart_sbg = ctx
             .device
             .UART4
-            .serial((tx, rx), 57600.bps(), ccdr.peripheral.UART4, &ccdr.clocks)
+            .serial((tx, rx), 115_200.bps(), ccdr.peripheral.UART4, &ccdr.clocks)
             .unwrap();
-        // let mut sbg_manager = sbg_manager::SBGManager::new(uart_sbg, stream_tuple);
-
+        let sbg_manager = sbg_manager::SBGManager::new(uart_sbg, stream_tuple);
+        
+        // UART for radio
+        let tx = gpioe.pe8.into_alternate();
+        let rx = gpioe.pe7.into_alternate();
+        let uart_radio = ctx
+            .device
+            .UART7
+            .serial((tx, rx), 57600.bps(), ccdr.peripheral.UART7, &ccdr.clocks)
+            .unwrap();
         let radio = RadioDevice::new(uart_radio);
-
         let radio_manager = RadioManager::new(radio);
 
         let mut rtc = stm32h7xx_hal::rtc::Rtc::open_or_init(
@@ -312,8 +324,9 @@ mod app {
                 data_manager,
                 madgwick_service,
                 em,
-                // sd_manager,
+                sd_manager,
                 radio_manager,
+                sbg_manager,
                 can_command_manager,
                 can_data_manager,
                 sbg_power,
@@ -331,12 +344,12 @@ mod app {
     async fn generate_random_messages(mut cx: generate_random_messages::Context) {
         loop {
             cx.shared.em.run(|| {
-                let message = Message::new(
+                let message = RadioMessage::new(
                     cx.shared
                         .rtc
                         .lock(|rtc| messages::FormattedNaiveDateTime(rtc.date_time().unwrap())),
                     COM_ID,
-                    messages::state::State::new(messages::state::StateData::Initializing),
+                    messages::Common::State(messages::state::State::Initializing),
                 );
                 spawn!(send_gs, message.clone())?;
                 // spawn!(send_data_internal, message)?;
@@ -368,7 +381,7 @@ mod app {
                     stm32h7xx_hal::rcc::ResetReason::Unknown { rcc_rsr } => sensor::ResetReason::Unknown { rcc_rsr },
                     stm32h7xx_hal::rcc::ResetReason::WindowWatchdogReset => sensor::ResetReason::WindowWatchdogReset,
                 };
-                let message = messages::Message::new(
+                let message = RadioMessage::new(
                     cx.shared
                         .rtc
                         .lock(|rtc| messages::FormattedNaiveDateTime(rtc.date_time().unwrap())),
@@ -393,12 +406,12 @@ mod app {
             .lock(|data_manager| data_manager.state.clone());
         cx.shared.em.run(|| {
             if let Some(x) = state_data {
-                let message = Message::new(
+                let message = RadioMessage::new(
                     cx.shared
                         .rtc
                         .lock(|rtc| messages::FormattedNaiveDateTime(rtc.date_time().unwrap())),
                     COM_ID,
-                    messages::state::State::new(x),
+                    messages::Common::State(x),
                 );
                 spawn!(send_gs, message)?;
             } // if there is none we still return since we simply don't have data yet.
@@ -447,16 +460,16 @@ mod app {
     }
 
     /// Receives a log message from the custom logger so that it can be sent over the radio.
-    pub fn queue_gs_message(d: impl Into<Data>) {
+    pub fn queue_gs_message<'a>(d: impl Into<RadioData<'a>>) {
         info!("Queueing message");
         send_gs_intermediate::spawn(d.into()).ok();
     }
 
     #[task(priority = 3, shared = [rtc, &em])]
-    async fn send_gs_intermediate(mut cx: send_gs_intermediate::Context, m: Data) {
+    async fn send_gs_intermediate(mut cx: send_gs_intermediate::Context, m: RadioData<'_>) {
         cx.shared.em.run(|| {
             cx.shared.rtc.lock(|rtc| {
-                let message = messages::Message::new(
+                let message = RadioMessage::new(
                     messages::FormattedNaiveDateTime(rtc.date_time().unwrap()),
                     COM_ID,
                     m,
@@ -491,7 +504,7 @@ mod app {
      * Sends a message to the radio over UART.
      */
     #[task(priority = 3, shared = [&em, radio_manager])]
-    async fn send_gs(mut cx: send_gs::Context, m: Message) {
+    async fn send_gs(mut cx: send_gs::Context, m: RadioMessage<'_>) {
         // info!("{}", m.clone());
 
         cx.shared.radio_manager.lock(|radio_manager| {
@@ -525,7 +538,7 @@ mod app {
     #[task(priority = 2, shared = [&em, can_data_manager, data_manager])]
     async fn send_data_internal(
         mut cx: send_data_internal::Context,
-        mut receiver: Receiver<'static, Message, DATA_CHANNEL_CAPACITY>,
+        mut receiver: Receiver<'static, CanMessage, DATA_CHANNEL_CAPACITY>,
     ) {
         loop {
             if let Ok(m) = receiver.recv().await {
@@ -540,7 +553,7 @@ mod app {
     }
 
     #[task(priority = 2, shared = [&em, can_command_manager, data_manager])]
-    async fn send_command_internal(mut cx: send_command_internal::Context, m: Message) {
+    async fn send_command_internal(mut cx: send_command_internal::Context, m: CanMessage) {
         // while let Ok(m) = receiver.recv().await {
         cx.shared.can_command_manager.lock(|can| {
             cx.shared.em.run(|| {
@@ -586,5 +599,27 @@ mod app {
         cx.shared.sbg_power.lock(|sbg| {
             sbg.set_low();
         });
+    }
+
+    // These tasks are defined in sbg_manager but RTIC can only apply macros to definitions in the same module.
+    // Declaring these as extern allows us to decorate them with the appropriate macros.
+    extern "Rust" {
+        #[task(priority = 1, shared = [&em, sd_manager])]
+        async fn sbg_sd_task(context: sbg_sd_task::Context, data: [u8; SBG_BUFFER_SIZE]);
+
+        #[task(priority = 3, binds = DMA1_STR1, shared = [&em, sbg_manager])]
+        fn sbg_dma(mut context: sbg_dma::Context);
+
+        #[task(priority = 2, shared = [data_manager])]
+        async fn sbg_handle_data(context: sbg_handle_data::Context, data: CallbackData);
+
+        #[task(priority = 1, shared = [&em, sbg_manager])]
+        async fn sbg_flush(context: sbg_flush::Context);
+
+        #[task(priority = 1, shared = [&em, sbg_manager])]
+        async fn sbg_write_data(context: sbg_write_data::Context, data: Vec<u8, SBG_BUFFER_SIZE>);
+
+        #[task(priority = 1, shared = [&em, rtc])]
+        async fn sbg_get_time(context: sbg_get_time::Context, time: &mut u32);
     }
 }

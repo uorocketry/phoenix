@@ -7,9 +7,8 @@ use fdcan::{
     id::StandardId,
 };
 use mavlink::peek_reader::PeekReader;
-use messages::mavlink::uorocketry::MavMessage;
+use messages::{mavlink::uorocketry::MavMessage, CanMessage, RadioMessage};
 use messages::mavlink::{self};
-use messages::Message;
 use postcard::from_bytes;
 
 /// Clock configuration is out of scope for this builder
@@ -30,7 +29,7 @@ impl CanCommandManager {
     ) -> Self {
         Self { can }
     }
-    pub fn send_message(&mut self, m: Message) -> Result<(), HydraError> {
+    pub fn send_message(&mut self, m: CanMessage) -> Result<(), HydraError> {
         let mut buf = [0u8; 64];
         let payload = postcard::to_slice(&m, &mut buf)?;
         let header = TxFrameHeader {
@@ -46,11 +45,11 @@ impl CanCommandManager {
     pub fn process_data(&mut self, data_manager: &mut DataManager) -> Result<(), HydraError> {
         let mut buf = [0u8; 64];
         while self.can.receive0(&mut buf).is_ok() {
-            if let Ok(data) = from_bytes::<Message>(&buf) {
+            if let Ok(data) = from_bytes::<CanMessage>(&buf) {
                 info!("Received message {}", data.clone());
                 data_manager.handle_command(data)?;
             } else {
-                info!("Error: {:?}", from_bytes::<Message>(&buf).unwrap_err());
+                info!("Error: {:?}", from_bytes::<CanMessage>(&buf).unwrap_err());
             }
         }
         Ok(())
@@ -75,7 +74,7 @@ impl CanDataManager {
     ) -> Self {
         Self { can }
     }
-    pub fn send_message(&mut self, m: Message) -> Result<(), HydraError> {
+    pub fn send_message(&mut self, m: CanMessage) -> Result<(), HydraError> {
         let mut buf = [0u8; 64];
         let payload = postcard::to_slice(&m, &mut buf)?;
         let header = TxFrameHeader {
@@ -94,10 +93,10 @@ impl CanDataManager {
     pub fn process_data(&mut self) -> Result<(), HydraError> {
         let mut buf = [0u8; 64];
         while self.can.receive0(&mut buf).is_ok() {
-            if let Ok(data) = from_bytes::<Message>(&buf) {
+            if let Ok(data) = from_bytes::<CanMessage>(&buf) {
                 info!("Received message {}", data.clone());
                 crate::app::send_gs::spawn(data).ok();
-            } else if let Err(e) = from_bytes::<Message>(&buf) {
+            } else if let Err(e) = from_bytes::<CanMessage>(&buf) {
                 info!("Error: {:?}", e);
             }
         }
@@ -105,10 +104,10 @@ impl CanDataManager {
             .clear_interrupt(fdcan::interrupt::Interrupt::RxFifo0NewMsg);
         Ok(())
     }
-    pub fn receive_message(&mut self) -> Result<Option<Message>, HydraError> {
+    pub fn receive_message(&mut self) -> Result<Option<CanMessage>, HydraError> {
         let mut buf = [0u8; 64];
         if self.can.receive0(&mut buf).is_ok() {
-            if let Ok(data) = from_bytes::<Message>(&buf) {
+            if let Ok(data) = from_bytes::<CanMessage>(&buf) {
                 return Ok(Some(data));
             }
         }
@@ -117,12 +116,12 @@ impl CanDataManager {
 }
 
 pub struct RadioDevice {
-    transmitter: stm32h7xx_hal::serial::Tx<stm32h7xx_hal::pac::UART4>,
-    pub receiver: PeekReader<stm32h7xx_hal::serial::Rx<stm32h7xx_hal::pac::UART4>>,
+    transmitter: stm32h7xx_hal::serial::Tx<stm32h7xx_hal::pac::UART7>,
+    pub receiver: PeekReader<stm32h7xx_hal::serial::Rx<stm32h7xx_hal::pac::UART7>>,
 }
 
 impl RadioDevice {
-    pub fn new(uart: stm32h7xx_hal::serial::Serial<stm32h7xx_hal::pac::UART4>) -> Self {
+    pub fn new(uart: stm32h7xx_hal::serial::Serial<stm32h7xx_hal::pac::UART7>) -> Self {
         let (tx, mut rx) = uart.split();
 
         rx.listen();
@@ -175,7 +174,7 @@ impl RadioManager {
         self.mav_sequence = self.mav_sequence.wrapping_add(1);
         self.mav_sequence
     }
-    pub fn receive_message(&mut self) -> Result<Message, HydraError> {
+    pub fn receive_message(&mut self) -> Result<RadioMessage, HydraError> {
         let (_header, msg): (_, MavMessage) =
             mavlink::read_versioned_msg(&mut self.radio.receiver, mavlink::MavlinkVersion::V2)?;
 
@@ -183,12 +182,12 @@ impl RadioManager {
         // Do we need the header?
         match msg {
             mavlink::uorocketry::MavMessage::POSTCARD_MESSAGE(msg) => {
-                Ok(postcard::from_bytes::<Message>(&msg.message)?)
+                Ok(from_bytes::<RadioMessage>(&msg.message)?)
                 // weird Ok syntax to coerce to hydra error type.
             }
             mavlink::uorocketry::MavMessage::COMMAND_MESSAGE(command) => {
                 info!("{}", command.command);
-                Ok(postcard::from_bytes::<Message>(&command.command)?)
+                Ok(from_bytes::<RadioMessage>(&command.command)?)
             }
             mavlink::uorocketry::MavMessage::HEARTBEAT(_) => {
                 info!("Heartbeat");
