@@ -19,12 +19,12 @@ use fdcan::{
     filter::{StandardFilter, StandardFilterSlot},
 };
 use heapless::Vec;
+use messages::{CanMessage, RadioData, RadioMessage};
 use messages::command::RadioRate;
-use messages::{sensor, Data};
 use panic_probe as _;
 use rtic_monotonics::systick::prelude::*;
 use rtic_sync::{channel::*, make_channel};
-use sbg_manager::{SBGManager, sbg_dma, sbg_handle_data, sbg_flush, sbg_write_data, sbg_sd_task};
+use sbg_manager::{SBGManager, sbg_dma, sbg_handle_data, sbg_flush, sbg_write_data, sbg_sd_task, sbg_get_time};
 use sbg_rs::{CallbackData, SBG_BUFFER_SIZE};
 use stm32h7xx_hal::dma::dma::StreamsTuple;
 use stm32h7xx_hal::gpio::gpioa::{PA2, PA3, PA4};
@@ -51,9 +51,6 @@ fn panic() -> ! {
 
 #[rtic::app(device = stm32h7xx_hal::stm32, peripherals = true, dispatchers = [EXTI0, EXTI1, EXTI2, SPI3, SPI2])]
 mod app {
-
-    use messages::Message;
-    use stm32h7xx_hal::gpio::{Alternate, Pin};
 
     use super::*;
 
@@ -87,7 +84,7 @@ mod app {
     #[init]
     fn init(ctx: init::Context) -> (SharedResources, LocalResources) {
         // channel setup
-        let (_s, r) = make_channel!(Message, DATA_CHANNEL_CAPACITY);
+        let (_s, r) = make_channel!(CanMessage, DATA_CHANNEL_CAPACITY);
 
         let core = ctx.core;
 
@@ -270,23 +267,23 @@ mod app {
         sbg_power.set_high();
 
         // UART for sbg
-        let tx: Pin<'A', 0, Alternate<8>> = gpioa.pa0.into_alternate();
-        let rx: Pin<'A', 1, Alternate<8>> = gpioa.pa1.into_alternate();
+        let tx = gpioa.pa0.into_alternate();
+        let rx = gpioa.pa1.into_alternate();
         let stream_tuple = StreamsTuple::new(ctx.device.DMA1, ccdr.peripheral.DMA1);
         let uart_sbg = ctx
             .device
             .UART4
-            .serial((tx, rx), 57600.bps(), ccdr.peripheral.UART4, &ccdr.clocks)
+            .serial((tx, rx), 115_200.bps(), ccdr.peripheral.UART4, &ccdr.clocks)
             .unwrap();
         let sbg_manager = sbg_manager::SBGManager::new(uart_sbg, stream_tuple);
         
         // UART for radio
-        let tx: Pin<'E', 8, Alternate<8>> = gpioe.pe8.into_alternate();
-        let rx: Pin<'E', 7, Alternate<8>> = gpioe.pe7.into_alternate();
+        let tx = gpioe.pe8.into_alternate();
+        let rx = gpioe.pe7.into_alternate();
         let uart_radio = ctx
             .device
-            .UART4
-            .serial((tx, rx), 57600.bps(), ccdr.peripheral.UART4, &ccdr.clocks)
+            .UART7
+            .serial((tx, rx), 57600.bps(), ccdr.peripheral.UART7, &ccdr.clocks)
             .unwrap();
         let radio = RadioDevice::new(uart_radio);
         let radio_manager = RadioManager::new(radio);
@@ -347,12 +344,12 @@ mod app {
     async fn generate_random_messages(mut cx: generate_random_messages::Context) {
         loop {
             cx.shared.em.run(|| {
-                let message = Message::new(
+                let message = RadioMessage::new(
                     cx.shared
                         .rtc
                         .lock(|rtc| messages::FormattedNaiveDateTime(rtc.date_time().unwrap())),
                     COM_ID,
-                    messages::state::State::new(messages::state::StateData::Initializing),
+                    messages::Common::State(messages::state::State::Initializing),
                 );
                 spawn!(send_gs, message.clone())?;
                 // spawn!(send_data_internal, message)?;
@@ -384,7 +381,7 @@ mod app {
                     stm32h7xx_hal::rcc::ResetReason::Unknown { rcc_rsr } => sensor::ResetReason::Unknown { rcc_rsr },
                     stm32h7xx_hal::rcc::ResetReason::WindowWatchdogReset => sensor::ResetReason::WindowWatchdogReset,
                 };
-                let message = messages::Message::new(
+                let message = RadioMessage::new(
                     cx.shared
                         .rtc
                         .lock(|rtc| messages::FormattedNaiveDateTime(rtc.date_time().unwrap())),
@@ -409,12 +406,12 @@ mod app {
             .lock(|data_manager| data_manager.state.clone());
         cx.shared.em.run(|| {
             if let Some(x) = state_data {
-                let message = Message::new(
+                let message = RadioMessage::new(
                     cx.shared
                         .rtc
                         .lock(|rtc| messages::FormattedNaiveDateTime(rtc.date_time().unwrap())),
                     COM_ID,
-                    messages::state::State::new(x),
+                    messages::Common::State(x),
                 );
                 spawn!(send_gs, message)?;
             } // if there is none we still return since we simply don't have data yet.
@@ -463,16 +460,16 @@ mod app {
     }
 
     /// Receives a log message from the custom logger so that it can be sent over the radio.
-    pub fn queue_gs_message(d: impl Into<Data>) {
+    pub fn queue_gs_message<'a>(d: impl Into<RadioData<'a>>) {
         info!("Queueing message");
         send_gs_intermediate::spawn(d.into()).ok();
     }
 
     #[task(priority = 3, shared = [rtc, &em])]
-    async fn send_gs_intermediate(mut cx: send_gs_intermediate::Context, m: Data) {
+    async fn send_gs_intermediate(mut cx: send_gs_intermediate::Context, m: RadioData<'_>) {
         cx.shared.em.run(|| {
             cx.shared.rtc.lock(|rtc| {
-                let message = messages::Message::new(
+                let message = RadioMessage::new(
                     messages::FormattedNaiveDateTime(rtc.date_time().unwrap()),
                     COM_ID,
                     m,
@@ -507,7 +504,7 @@ mod app {
      * Sends a message to the radio over UART.
      */
     #[task(priority = 3, shared = [&em, radio_manager])]
-    async fn send_gs(mut cx: send_gs::Context, m: Message) {
+    async fn send_gs(mut cx: send_gs::Context, m: RadioMessage<'_>) {
         // info!("{}", m.clone());
 
         cx.shared.radio_manager.lock(|radio_manager| {
@@ -541,7 +538,7 @@ mod app {
     #[task(priority = 2, shared = [&em, can_data_manager, data_manager])]
     async fn send_data_internal(
         mut cx: send_data_internal::Context,
-        mut receiver: Receiver<'static, Message, DATA_CHANNEL_CAPACITY>,
+        mut receiver: Receiver<'static, CanMessage, DATA_CHANNEL_CAPACITY>,
     ) {
         loop {
             if let Ok(m) = receiver.recv().await {
@@ -556,7 +553,7 @@ mod app {
     }
 
     #[task(priority = 2, shared = [&em, can_command_manager, data_manager])]
-    async fn send_command_internal(mut cx: send_command_internal::Context, m: Message) {
+    async fn send_command_internal(mut cx: send_command_internal::Context, m: CanMessage) {
         // while let Ok(m) = receiver.recv().await {
         cx.shared.can_command_manager.lock(|can| {
             cx.shared.em.run(|| {
@@ -621,5 +618,8 @@ mod app {
 
         #[task(priority = 1, shared = [&em, sbg_manager])]
         async fn sbg_write_data(context: sbg_write_data::Context, data: Vec<u8, SBG_BUFFER_SIZE>);
+
+        #[task(priority = 1, shared = [&em, rtc])]
+        async fn sbg_get_time(context: sbg_get_time::Context, time: &mut u32);
     }
 }

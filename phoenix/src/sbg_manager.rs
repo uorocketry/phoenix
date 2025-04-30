@@ -2,10 +2,9 @@ use core::alloc::{GlobalAlloc, Layout};
 use core::ffi::c_void;
 use core::mem::size_of;
 use core::ptr;
-use crate::app::sbg_flush;
+use crate::app::{sbg_flush, sbg_get_time};
 use crate::app::sbg_handle_data;
 use crate::app::sbg_write_data;
-use crate::RTC;
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
 use core::mem::MaybeUninit;
 use defmt::info;
@@ -22,6 +21,8 @@ use stm32h7xx_hal::dma::{
 use stm32h7xx_hal::pac::UART4;
 use stm32h7xx_hal::serial::{Rx, Tx};
 use messages::mavlink::embedded::Write;
+
+const SBG_LOG_FILE_NAME: &str = "lc24.txt";
 
 // must have this link section.
 #[link_section = ".axisram.buffers"]
@@ -106,14 +107,18 @@ impl SBGManager {
         // info!("Transfer complete");
         // info!("{}", unsafe { SBG_BUFFER.assume_init_read() });
 
-        let mut sbg: sbg::SBG = sbg::SBG::new(
+        let sbg: sbg::SBG = sbg::SBG::new(
             |data| {
                 sbg_handle_data::spawn(data).ok();
             },
             |data| {
                 sbg_write_data::spawn(data).ok();
             },
-            || sbg_get_time(),
+            || {
+                let mut time: u32 = 0;
+                sbg_get_time::spawn(&mut time).ok();
+                time
+            },
             || {
                 sbg_flush::spawn().ok();
             },
@@ -129,9 +134,9 @@ impl SBGManager {
     }
 }
 
-pub async fn sbg_flush(cx: sbg_flush::Context<'_>) {
+pub async fn sbg_flush(mut _cx: sbg_flush::Context<'_>) {
     // cx.shared.sbg_manager.lock(|sbg| {
-    // sbg.sbg_tx
+    //     sbg.sbg_tx
     // });
 }
 
@@ -141,10 +146,8 @@ pub async fn sbg_write_data(mut cx: sbg_write_data::Context<'_>, data: Vec<u8, S
     });
 }
 
-pub fn sbg_get_time() -> u32 {
-    cortex_m::interrupt::free(|cs| {
-        let mut rc = RTC.borrow(cs).borrow_mut();
-        let rtc = rc.as_mut().unwrap();
+pub fn sbg_get_time(mut cx: sbg_get_time::Context, time: &mut u32) {
+    *time = cx.shared.rtc.lock(|rtc| {
         rtc.date_time()
             .unwrap_or(NaiveDateTime::new(
                 NaiveDate::from_ymd_opt(2024, 1, 1).unwrap(),
@@ -152,7 +155,7 @@ pub fn sbg_get_time() -> u32 {
             ))
             .and_utc()
             .timestamp_subsec_millis()
-    })
+    });
 }
 
 pub async fn sbg_handle_data(mut cx: sbg_handle_data::Context<'_>, data: CallbackData) {
@@ -178,7 +181,7 @@ pub async fn sbg_sd_task(
                 Ok(())
             });
             manager.file = Some(file); // give the file back after use
-        } else if let Ok(mut file) = manager.open_file("lc24.txt") {
+        } else if let Ok(mut file) = manager.open_file(SBG_LOG_FILE_NAME) {
             cx.shared.em.run(|| {
                 manager.write(&mut file, &data)?;
                 Ok(())
