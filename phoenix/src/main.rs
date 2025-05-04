@@ -74,10 +74,14 @@ mod app {
             0,
             stm32h7xx_hal::pwm::ComplementaryImpossible,
         >,
+        // BARO SC PB_08
+        // BARO_SPI_CLK PE_02
+        // BARO_SPI_MISO PE_05
+        // BARO_SPI_MOSI PE_06
         baro: common_arm::drivers::ms5611::Ms5611<
-            stm32h7xx_hal::pac::SPIx,
-            
-            
+            stm32h7xx_hal::spi::Spi<stm32h7xx_hal::pac::SPI4, stm32h7xx_hal::spi::Enabled>,
+            stm32h7xx_hal::gpio::Pin<'B', 8, stm32h7xx_hal::gpio::Output<stm32h7xx_hal::gpio::PushPull>>,
+            stm32h7xx_hal::delay::Delay
         >,
     }
 
@@ -265,6 +269,26 @@ mod app {
         let mut sbg_power = gpiob.pb4.into_push_pull_output();
         sbg_power.set_high();
 
+        // Configure SPI4 for barometer
+        let gpioe = ctx.device.GPIOE.split(ccdr.peripheral.GPIOE);
+        let spi4 = ctx.device.SPI4.spi(
+            (
+                gpioe.pe2.into_alternate(),  // SCK
+                gpioe.pe5.into_alternate(),  // MISO
+                gpioe.pe6.into_alternate(),  // MOSI
+            ),
+            stm32h7xx_hal::spi::Config::new(stm32h7xx_hal::spi::MODE_0),
+            16.MHz(),
+            ccdr.peripheral.SPI4,
+            &ccdr.clocks,
+        );
+        let baro_cs = gpiob.pb8.into_push_pull_output();
+        let delay_tim = ctx.device.TIM2.delay(&ccdr.clocks);
+        /* Monotonic clock */
+        Mono::start(core.SYST, 200_000_000);
+
+        let baro = common_arm::drivers::ms5611::Ms5611::new(spi4, baro_cs, delay_tim).unwrap();
+
         // UART for sbg
         let tx: Pin<'D', 1, Alternate<8>> = gpiod.pd1.into_alternate();
         let rx: Pin<'D', 0, Alternate<8>> = gpiod.pd0.into_alternate();
@@ -296,9 +320,6 @@ mod app {
 
         rtc.set_date_time(now);
 
-        /* Monotonic clock */
-        Mono::start(core.SYST, 200_000_000);
-
         let madgwick_service = madgwick_service::MadgwickService::new();
 
         let mut data_manager = DataManager::new();
@@ -328,6 +349,7 @@ mod app {
                 led_red,
                 led_green,
                 buzzer: c0,
+                baro,
             },
         )
     }
@@ -341,7 +363,7 @@ mod app {
                 
 
                 Ok(())
-            })
+            });
             Mono::delay(3.millis()).await;
         }
     }
