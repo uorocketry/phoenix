@@ -1,29 +1,28 @@
 use common_arm::HydraError;
 use messages::command::RadioRate;
-use messages::state::StateData;
-use messages::Message;
 use stm32h7xx_hal::rcc::ResetReason;
 #[derive(Clone)]
 pub struct DataManager {
-    pub air: Option<Message>,
-    pub ekf_nav_1: Option<Message>,
-    pub ekf_nav_2: Option<Message>,
-    pub ekf_nav_acc: Option<Message>,
-    pub ekf_quat: Option<Message>,
-    pub madgwick_quat: Option<Message>,
-    pub imu_1: Option<Message>,
-    pub imu_2: Option<Message>,
-    pub utc_time: Option<Message>,
-    pub gps_vel: Option<Message>,
-    pub gps_vel_acc: Option<Message>,
-    pub gps_pos_1: Option<Message>,
-    pub gps_pos_2: Option<Message>,
-    pub gps_pos_acc: Option<Message>,
-    pub state: Option<StateData>,
-    pub reset_reason: Option<ResetReason>,
-    pub logging_rate: Option<RadioRate>,
-    pub recovery_sensing: Option<Message>,
-    pub nav_pos_l1h: Option<Message>,
+   pub air: Option<Message>, 
+    // pub air: Option<Message>,
+    // pub ekf_nav_1: Option<Message>,
+    // pub ekf_nav_2: Option<Message>,
+    // pub ekf_nav_acc: Option<Message>,
+    // pub ekf_quat: Option<Message>,
+    // pub madgwick_quat: Option<Message>,
+    // pub imu_1: Option<Message>,
+    // pub imu_2: Option<Message>,
+    // pub utc_time: Option<Message>,
+    // pub gps_vel: Option<Message>,
+    // pub gps_vel_acc: Option<Message>,
+    // pub gps_pos_1: Option<Message>,
+    // pub gps_pos_2: Option<Message>,
+    // pub gps_pos_acc: Option<Message>,
+    // pub state: Option<StateData>,
+    // pub reset_reason: Option<ResetReason>,
+    // pub logging_rate: Option<RadioRate>,
+    // pub recovery_sensing: Option<Message>,
+    // pub nav_pos_l1h: Option<Message>,
 }
 
 impl DataManager {

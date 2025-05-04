@@ -9,7 +9,6 @@ mod can_manager;
 
 use chrono::NaiveDate;
 use common_arm::*;
-use communication::{CanCommandManager, CanDataManager};
 use communication::{RadioDevice, RadioManager};
 use core::num::{NonZeroU16, NonZeroU8};
 use data_manager::DataManager;
