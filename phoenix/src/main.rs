@@ -46,7 +46,7 @@ fn panic() -> ! {
 mod app {
 
     use messages::Message;
-    use stm32h7xx_hal::gpio::{Alternate, Pin};
+    use stm32h7xx_hal::{delay::Delay, gpio::{Alternate, Pin}};
 
     use super::*;
 
@@ -73,6 +73,11 @@ mod app {
             stm32h7xx_hal::pac::TIM12,
             0,
             stm32h7xx_hal::pwm::ComplementaryImpossible,
+        >,
+        baro: common_arm::drivers::ms5611::Ms5611<
+            stm32h7xx_hal::pac::SPIx,
+            
+            
         >,
     }
 
@@ -325,6 +330,20 @@ mod app {
                 buzzer: c0,
             },
         )
+    }
+
+    // it would be nice to have RTIC be able to return objects, but the current procedural macro
+    // does not allow for this.
+    #[task(priority = 2, local = [baro], shared = [&em, data_manager])]
+    async fn baro_read(mut cx: baro_read::Context) {
+        loop {
+            cx.shared.em.run(|| {
+                
+
+                Ok(())
+            })
+            Mono::delay(3.millis()).await;
+        }
     }
 
     #[task(priority = 3, shared = [&em, rtc])]

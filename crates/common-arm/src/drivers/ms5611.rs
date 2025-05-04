@@ -221,7 +221,7 @@ where
     }
 
     /// Reads the 24-bit raw ADC result from the sensor.
-    fn read_adc_raw(&mut self) -> Result<u32, Error<SPIE, CSE>> {
+    pub fn read_adc_raw(&mut self) -> Result<u32, Error<SPIE, CSE>> {
         with_cs!(self, {
             // Send ADC Read command (0x00) to clock out the data
             let mut buffer = [command::ADC_READ, 0x00, 0x00, 0x00]; // Send read cmd, receive 3 bytes
