@@ -46,7 +46,7 @@ fn panic() -> ! {
 mod app {
 
     use messages::Message;
-    use stm32h7xx_hal::{delay::Delay, gpio::{Alternate, Pin}};
+    use stm32h7xx_hal::gpio::{Alternate, Pin};
 
     use super::*;
 
@@ -74,14 +74,21 @@ mod app {
             0,
             stm32h7xx_hal::pwm::ComplementaryImpossible,
         >,
-        // BARO SC PB_08
-        // BARO_SPI_CLK PE_02
-        // BARO_SPI_MISO PE_05
-        // BARO_SPI_MOSI PE_06
+        // Baro uses:
+        // PB_08 for CS
+        // PE_02 for SCK
+        // PE_05 for MISO
+        // PE_06 for MOSI
         baro: common_arm::drivers::ms5611::Ms5611<
             stm32h7xx_hal::spi::Spi<stm32h7xx_hal::pac::SPI4, stm32h7xx_hal::spi::Enabled>,
-            stm32h7xx_hal::gpio::Pin<'B', 8, stm32h7xx_hal::gpio::Output<stm32h7xx_hal::gpio::PushPull>>,
-            stm32h7xx_hal::delay::Delay
+            stm32h7xx_hal::gpio::Pin<
+                'B',
+                8,
+                stm32h7xx_hal::gpio::Output<stm32h7xx_hal::gpio::PushPull>,
+            >,
+            stm32h7xx_hal::delay::DelayFromCountDownTimer<
+                stm32h7xx_hal::timer::Timer<stm32h7xx_hal::pac::TIM2>,
+            >,
         >,
     }
 
@@ -273,9 +280,9 @@ mod app {
         let gpioe = ctx.device.GPIOE.split(ccdr.peripheral.GPIOE);
         let spi4 = ctx.device.SPI4.spi(
             (
-                gpioe.pe2.into_alternate(),  // SCK
-                gpioe.pe5.into_alternate(),  // MISO
-                gpioe.pe6.into_alternate(),  // MOSI
+                gpioe.pe2.into_alternate(), // SCK
+                gpioe.pe5.into_alternate(), // MISO
+                gpioe.pe6.into_alternate(), // MOSI
             ),
             stm32h7xx_hal::spi::Config::new(stm32h7xx_hal::spi::MODE_0),
             16.MHz(),
@@ -283,7 +290,11 @@ mod app {
             &ccdr.clocks,
         );
         let baro_cs = gpiob.pb8.into_push_pull_output();
-        let delay_tim = ctx.device.TIM2.delay(&ccdr.clocks);
+        let timer2 = ctx
+            .device
+            .TIM2
+            .timer(1.MHz(), ccdr.peripheral.TIM2, &ccdr.clocks);
+        let delay_tim = stm32h7xx_hal::delay::DelayFromCountDownTimer::new(timer2);
         /* Monotonic clock */
         Mono::start(core.SYST, 200_000_000);
 
@@ -357,13 +368,9 @@ mod app {
     // it would be nice to have RTIC be able to return objects, but the current procedural macro
     // does not allow for this.
     #[task(priority = 2, local = [baro], shared = [&em, data_manager])]
-    async fn baro_read(mut cx: baro_read::Context) {
+    async fn baro_read(cx: baro_read::Context) {
         loop {
-            cx.shared.em.run(|| {
-                
-
-                Ok(())
-            });
+            cx.shared.em.run(|| Ok(()));
             Mono::delay(3.millis()).await;
         }
     }
