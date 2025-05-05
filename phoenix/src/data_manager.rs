@@ -24,6 +24,9 @@ pub struct DataManager {
     pub logging_rate: Option<RadioRate>,
     pub recovery_sensing: Option<Message>,
     pub nav_pos_l1h: Option<Message>,
+    // Barometer
+    pub baro_temperature: Option<f32>,
+    pub baro_pressure: Option<f32>,
 }
 
 impl DataManager {
@@ -48,6 +51,8 @@ impl DataManager {
             logging_rate: Some(RadioRate::Slow), // start slow.
             recovery_sensing: None,
             nav_pos_l1h: None,
+            baro_temperature: None,
+            baro_pressure: None,
         }
     }
 

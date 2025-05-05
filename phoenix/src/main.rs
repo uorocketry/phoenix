@@ -32,7 +32,6 @@ use stm32h7xx_hal::{rcc, rcc::rec};
 use types::COM_ID; // global logger
 
 const DATA_CHANNEL_CAPACITY: usize = 10;
-
 systick_monotonic!(Mono, 500);
 
 #[inline(never)]
@@ -45,6 +44,7 @@ fn panic() -> ! {
 #[rtic::app(device = stm32h7xx_hal::stm32, peripherals = true, dispatchers = [EXTI0, EXTI1, EXTI2, SPI3, SPI2])]
 mod app {
 
+    use common_arm::drivers::ms5611::OversamplingRatio;
     use messages::Message;
     use stm32h7xx_hal::gpio::{Alternate, Pin};
 
@@ -368,9 +368,30 @@ mod app {
     // it would be nice to have RTIC be able to return objects, but the current procedural macro
     // does not allow for this.
     #[task(priority = 2, local = [baro], shared = [&em, data_manager])]
-    async fn baro_read(cx: baro_read::Context) {
+    async fn baro_read(mut cx: baro_read::Context) {
+        let baro = cx.local.baro; // Get mutable access to the driver
         loop {
-            cx.shared.em.run(|| Ok(()));
+            cx.shared.em.run(|| {
+                // Choose the desired Oversampling Ratio for this reading
+                let osr = OversamplingRatio::Osr4096; // Example: Highest precision
+
+                match baro.read_pressure_temperature(osr) {
+                    Ok((temp_c, press_mbar)) => {
+                        cx.shared.data_manager.lock(|dm| {
+                            dm.baro_temperature = Some(temp_c);
+                            dm.baro_pressure = Some(press_mbar);
+                        });
+                        Ok(())
+                    }
+                    Err(e) => {
+                        cx.shared.data_manager.lock(|dm| {
+                            dm.baro_temperature = None;
+                            dm.baro_pressure = None;
+                        });
+                        Err(HydraError::from(e))
+                    }
+                }
+            });
             Mono::delay(3.millis()).await;
         }
     }

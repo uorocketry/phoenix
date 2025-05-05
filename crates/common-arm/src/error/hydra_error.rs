@@ -5,6 +5,8 @@ use derive_more::From;
 use embedded_sdmmc as sd;
 use messages::ErrorContext;
 use nb::Error as NbError;
+
+use crate::drivers::ms5611;
 /// Open up atsamd hal errors without including the whole crate.
 
 /// Contains all the various error types that can be encountered in the Hydra codebase. Extra errors
@@ -19,6 +21,8 @@ pub enum HydraErrorType {
     SpawnError(&'static str),
     /// Error from the SD card library.
     SdCardError(sd::Error<sd::SdMmcError>),
+    /// Error from the Baro driver.
+    BaroError(ms5611::Error<stm32h7xx_hal::spi::Error, core::convert::Infallible>),
     /// Error from the Mavlink library.
     MavlinkError(messages::mavlink::error::MessageWriteError),
     MavlinkReadError(messages::mavlink::error::MessageReadError),
@@ -48,6 +52,9 @@ impl defmt::Format for HydraErrorType {
             }
             HydraErrorType::NbError(_) => {
                 write!(f, "Nb error!");
+            }
+            HydraErrorType::BaroError(_) => {
+                write!(f, "Baro error!");
             }
         }
     }
