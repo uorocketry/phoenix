@@ -6,6 +6,7 @@ use embedded_hal::{
     },
     digital::v2::OutputPin,
 };
+use defmt::info; // Add this line for logging
 
 // According to datasheet section 4.1
 mod command {
@@ -172,6 +173,12 @@ where
         sensor.delay.delay_us(3000);
 
         sensor.coefficients = sensor.read_coefficients()?;
+        info!("MS5611 PROM C1 (SENS_T1): {}", sensor.coefficients.c1_sens_t1);
+        info!("MS5611 PROM C2 (OFF_T1): {}", sensor.coefficients.c2_off_t1);
+        info!("MS5611 PROM C3 (TCS): {}", sensor.coefficients.c3_tcs);
+        info!("MS5611 PROM C4 (TCO): {}", sensor.coefficients.c4_tco);
+        info!("MS5611 PROM C5 (T_REF): {}", sensor.coefficients.c5_t_ref);
+        info!("MS5611 PROM C6 (TEMP_SENS): {}", sensor.coefficients.c6_temp_sens);
 
         // Optional: Implement CRC check here using PROM word 7 (0xAE)
 
@@ -252,13 +259,15 @@ where
     /// Performs a full temperature and pressure reading cycle and returns compensated values.
     /// Reads temperature (D2), then pressure (D1), then performs calculations.
     ///
-    /// Returns `(temperature_celsius, pressure_mbar)`
+    /// Returns `(temperature_celsius, pressure_kpa)`
     pub fn read_pressure_temperature(
         &mut self,
         osr: OversamplingRatio,
     ) -> Result<(f32, f32), Error<SPIE, CSE>> {
         let d2_raw = self.read_raw_temperature(osr)?;
+        info!("MS5611 Raw D2 (temperature): {}", d2_raw);
         let d1_raw = self.read_raw_pressure(osr)?;
+        info!("MS5611 Raw D1 (pressure): {}", d1_raw);
 
         self.calculate_compensated_values(d1_raw, d2_raw)
     }
@@ -266,13 +275,15 @@ where
     /// Calculates compensated temperature and pressure using raw ADC values and PROM coefficients.
     /// Implements the 1st and 2nd order compensation formulas from the datasheet.
     ///
-    /// Returns `(temperature_celsius, pressure_mbar)`
+    /// Returns `(temperature_celsius, pressure_kpa)`
     fn calculate_compensated_values(
         &self,
         d1_raw: u32, // Raw Pressure
         d2_raw: u32, // Raw Temperature
     ) -> Result<(f32, f32), Error<SPIE, CSE>> {
         let c = &self.coefficients;
+        info!("MS5611 Calc: Using C1={}, C2={}, C3={}, C4={}, C5={}, C6={}", c.c1_sens_t1, c.c2_off_t1, c.c3_tcs, c.c4_tco, c.c5_t_ref, c.c6_temp_sens);
+        info!("MS5611 Calc: Using D1_raw={}, D2_raw={}", d1_raw, d2_raw);
 
         // Cast coefficients to i64 for intermediate calculations to prevent overflow
         let c1 = c.c1_sens_t1 as i64;
@@ -287,15 +298,19 @@ where
         // --- First Order Calculation ---
         // dT = D2 - C5 * 2^8
         let dt = d2 - (c5 << 8);
+        info!("MS5611 Calc: dt = {}", dt);
 
         // TEMP = 2000 + dT * C6 / 2^23  (Result in 0.01 degC)
         let temp_i32 = (2000 + ((dt * c6) >> 23)) as i32; // Cast to i32 for checks
+        info!("MS5611 Calc: temp_i32 (1st order temp * 100) = {}", temp_i32);
 
         // OFF = C2 * 2^16 + (C4 * dT) / 2^7
         let off = (c2 << 16) + ((c4 * dt) >> 7);
+        info!("MS5611 Calc: off (1st order) = {}", off);
 
         // SENS = C1 * 2^15 + (C3 * dT) / 2^8
         let sens = (c1 << 15) + ((c3 * dt) >> 8);
+        info!("MS5611 Calc: sens (1st order) = {}", sens);
 
         // --- Second Order Temperature Compensation ---
         let mut temp = temp_i32 as i64; // Use i64 for further calculations
@@ -304,6 +319,7 @@ where
         let mut t2 = 0i64;
 
         if temp < 2000 {
+            info!("MS5611 Calc: Applying 2nd order comp for temp < 2000");
             // T2 = dT^2 / 2^31
             t2 = (dt * dt) >> 31;
 
@@ -313,13 +329,16 @@ where
 
             // SENS2 = 5 * (TEMP - 2000)^2 / 4
             sens2 = 5 * temp_diff_sq >> 2; // Divide by 4
+            info!("MS5611 Calc: t2 = {}, off2 = {}, sens2 = {}", t2, off2, sens2);
 
             if temp < -1500 {
+                info!("MS5611 Calc: Applying 2nd order comp for temp < -1500");
                 // OFF2 = OFF2 + 7 * (TEMP + 1500)^2
                 let temp_low_diff_sq = (temp + 1500) * (temp + 1500);
                 off2 += 7 * temp_low_diff_sq;
                 // SENS2 = SENS2 + 11 * (TEMP + 1500)^2 / 2
                 sens2 += 11 * temp_low_diff_sq >> 1; // Divide by 2
+                info!("MS5611 Calc: (temp < -1500) adjusted off2 = {}, sens2 = {}", off2, sens2);
             }
         }
 
@@ -327,19 +346,24 @@ where
         temp -= t2;
         let off_compensated = off - off2;
         let sens_compensated = sens - sens2;
+        info!("MS5611 Calc: final compensated temp_int (*100) = {}", temp);
+        info!("MS5611 Calc: final compensated off = {}", off_compensated);
+        info!("MS5611 Calc: final compensated sens = {}", sens_compensated);
 
         // --- Final Pressure Calculation ---
         // P = (D1 * SENS / 2^21 - OFF) / 2^15 (Result in 0.01 mbar)
         let p_i32 = (((d1 * sens_compensated) >> 21) - off_compensated) >> 15; // Cast to i32
+        info!("MS5611 Calc: p_i32 (final pressure * 10000 in Pa, or * 100 in mbar) = {}", p_i32);
 
         // Convert to final units (float)
         // Handle potential division by zero or NaN/Infinity results from float conversion
         let temp_celsius = temp as f32 / 100.0;
-        let pressure_mbar = p_i32 as f32 / 100.0;
+        // p_i32 is in 0.01 mbar. 1 mbar = 0.1 kPa. So p_i32 / 1000.0 gives kPa.
+        let pressure_kpa = p_i32 as f32 / 1000.0;
 
         // Check for NaN or Infinity which might occur if intermediate calculations were extreme
-        if temp_celsius.is_finite() && pressure_mbar.is_finite() {
-            Ok((temp_celsius, pressure_mbar))
+        if temp_celsius.is_finite() && pressure_kpa.is_finite() {
+            Ok((temp_celsius, pressure_kpa))
         } else {
             Err(Error::CalculationFault)
         }

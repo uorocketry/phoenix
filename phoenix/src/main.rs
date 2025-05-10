@@ -375,20 +375,20 @@ mod app {
             info!("Starting barometer reading cycle");
             cx.shared.em.run(|| {
                 // Choose the desired Oversampling Ratio for this reading
-                let osr = OversamplingRatio::Osr4096; // Example: Highest precision
-                info!("Reading with OSR: {}", osr as u8);
+                let osr = OversamplingRatio::Osr512; // Example: Highest precision
+                info!("Baro: Using OSR: {}", osr as u8);
 
                 match baro.read_pressure_temperature(osr) {
-                    Ok((temp_c, press_mbar)) => {
-                        info!("Barometer reading successful - Temp: {}, Pressure: {}", temp_c, press_mbar);
+                    Ok((temp_c, press_kpa)) => {
+                        info!("Baro: Driver output - Temp: {} C, Pressure: {} kPa", temp_c, press_kpa);
                         cx.shared.data_manager.lock(|dm| {
                             dm.baro_temperature = Some(temp_c);
-                            dm.baro_pressure = Some(press_mbar);
+                            dm.baro_pressure = Some(press_kpa);
                         });
                         Ok(())
                     }
                     Err(e) => {
-                        info!("Barometer reading failed");
+                        info!("Baro: Driver reading failed!");
                         cx.shared.data_manager.lock(|dm| {
                             dm.baro_temperature = None;
                             dm.baro_pressure = None;
@@ -397,7 +397,7 @@ mod app {
                     }
                 }
             });
-            Mono::delay(3.millis()).await;
+            Mono::delay(1000.millis()).await;
         }
     }
 
