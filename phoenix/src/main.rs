@@ -340,6 +340,7 @@ mod app {
         send_data_internal::spawn(r).ok();
         reset_reason_send::spawn().ok();
         state_send::spawn().ok();
+        baro_read::spawn().ok();
         // generate_random_messages::spawn().ok();
         // sensor_send::spawn().ok();
         info!("Online");
@@ -367,16 +368,19 @@ mod app {
 
     // it would be nice to have RTIC be able to return objects, but the current procedural macro
     // does not allow for this.
-    #[task(priority = 2, local = [baro], shared = [&em, data_manager])]
+    #[task(priority = 3, local = [baro], shared = [&em, data_manager])]
     async fn baro_read(mut cx: baro_read::Context) {
         let baro = cx.local.baro; // Get mutable access to the driver
         loop {
+            info!("Starting barometer reading cycle");
             cx.shared.em.run(|| {
                 // Choose the desired Oversampling Ratio for this reading
                 let osr = OversamplingRatio::Osr4096; // Example: Highest precision
+                info!("Reading with OSR: {}", osr as u8);
 
                 match baro.read_pressure_temperature(osr) {
                     Ok((temp_c, press_mbar)) => {
+                        info!("Barometer reading successful - Temp: {}, Pressure: {}", temp_c, press_mbar);
                         cx.shared.data_manager.lock(|dm| {
                             dm.baro_temperature = Some(temp_c);
                             dm.baro_pressure = Some(press_mbar);
@@ -384,6 +388,7 @@ mod app {
                         Ok(())
                     }
                     Err(e) => {
+                        info!("Barometer reading failed");
                         cx.shared.data_manager.lock(|dm| {
                             dm.baro_temperature = None;
                             dm.baro_pressure = None;

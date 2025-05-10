@@ -1,0 +1,9 @@
+probe:
+  # Increase SWD clock frequency to 4MHz (default is usually 1MHz)
+  speed: 4000
+  # Use SWD protocol
+  protocol: swd
+  # Enable faster flash operations
+  flash_algorithm:
+    enable_fast_program: true
+    enable_verify: false  # Skip verification for faster flashing 
