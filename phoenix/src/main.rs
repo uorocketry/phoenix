@@ -32,7 +32,6 @@ use stm32h7xx_hal::{rcc, rcc::rec};
 use types::COM_ID; // global logger
 
 const DATA_CHANNEL_CAPACITY: usize = 10;
-
 systick_monotonic!(Mono, 500);
 
 #[inline(never)]
@@ -45,6 +44,7 @@ fn panic() -> ! {
 #[rtic::app(device = stm32h7xx_hal::stm32, peripherals = true, dispatchers = [EXTI0, EXTI1, EXTI2, SPI3, SPI2])]
 mod app {
 
+    use common_arm::drivers::ms5611::OversamplingRatio;
     use messages::Message;
     use stm32h7xx_hal::gpio::{Alternate, Pin};
 
@@ -73,6 +73,22 @@ mod app {
             stm32h7xx_hal::pac::TIM12,
             0,
             stm32h7xx_hal::pwm::ComplementaryImpossible,
+        >,
+        // Baro uses:
+        // PB_08 for CS
+        // PE_02 for SCK
+        // PE_05 for MISO
+        // PE_06 for MOSI
+        baro: common_arm::drivers::ms5611::Ms5611<
+            stm32h7xx_hal::spi::Spi<stm32h7xx_hal::pac::SPI4, stm32h7xx_hal::spi::Enabled>,
+            stm32h7xx_hal::gpio::Pin<
+                'B',
+                8,
+                stm32h7xx_hal::gpio::Output<stm32h7xx_hal::gpio::PushPull>,
+            >,
+            stm32h7xx_hal::delay::DelayFromCountDownTimer<
+                stm32h7xx_hal::timer::Timer<stm32h7xx_hal::pac::TIM2>,
+            >,
         >,
     }
 
@@ -260,6 +276,30 @@ mod app {
         let mut sbg_power = gpiob.pb4.into_push_pull_output();
         sbg_power.set_high();
 
+        // Configure SPI4 for barometer
+        let gpioe = ctx.device.GPIOE.split(ccdr.peripheral.GPIOE);
+        let spi4 = ctx.device.SPI4.spi(
+            (
+                gpioe.pe2.into_alternate(), // SCK
+                gpioe.pe5.into_alternate(), // MISO
+                gpioe.pe6.into_alternate(), // MOSI
+            ),
+            stm32h7xx_hal::spi::Config::new(stm32h7xx_hal::spi::MODE_0),
+            16.MHz(),
+            ccdr.peripheral.SPI4,
+            &ccdr.clocks,
+        );
+        let baro_cs = gpiob.pb8.into_push_pull_output();
+        let timer2 = ctx
+            .device
+            .TIM2
+            .timer(1.MHz(), ccdr.peripheral.TIM2, &ccdr.clocks);
+        let delay_tim = stm32h7xx_hal::delay::DelayFromCountDownTimer::new(timer2);
+        /* Monotonic clock */
+        Mono::start(core.SYST, 200_000_000);
+
+        let baro = common_arm::drivers::ms5611::Ms5611::new(spi4, baro_cs, delay_tim).unwrap();
+
         // UART for sbg
         let tx: Pin<'D', 1, Alternate<8>> = gpiod.pd1.into_alternate();
         let rx: Pin<'D', 0, Alternate<8>> = gpiod.pd0.into_alternate();
@@ -291,9 +331,6 @@ mod app {
 
         rtc.set_date_time(now);
 
-        /* Monotonic clock */
-        Mono::start(core.SYST, 200_000_000);
-
         let madgwick_service = madgwick_service::MadgwickService::new();
 
         let mut data_manager = DataManager::new();
@@ -303,6 +340,7 @@ mod app {
         send_data_internal::spawn(r).ok();
         reset_reason_send::spawn().ok();
         state_send::spawn().ok();
+        baro_read::spawn().ok();
         // generate_random_messages::spawn().ok();
         // sensor_send::spawn().ok();
         info!("Online");
@@ -323,8 +361,41 @@ mod app {
                 led_red,
                 led_green,
                 buzzer: c0,
+                baro,
             },
         )
+    }
+
+    // it would be nice to have RTIC be able to return objects, but the current procedural macro
+    // does not allow for this.
+    #[task(priority = 3, local = [baro], shared = [&em, data_manager])]
+    async fn baro_read(mut cx: baro_read::Context) {
+        let baro = cx.local.baro; // Get mutable access to the driver
+        loop {
+            cx.shared.em.run(|| {
+                // Choose the desired Oversampling Ratio for this reading
+                let osr = OversamplingRatio::Osr512; // Example: Highest precision
+
+                match baro.read_pressure_temperature(osr) {
+                    Ok((temp_c, press_kpa)) => {
+                        cx.shared.data_manager.lock(|dm| {
+                            dm.baro_temperature = Some(temp_c);
+                            dm.baro_pressure = Some(press_kpa);
+                        });
+                        Ok(())
+                    }
+                    Err(e) => {
+                        info!("Baro: Driver reading failed!");
+                        cx.shared.data_manager.lock(|dm| {
+                            dm.baro_temperature = None;
+                            dm.baro_pressure = None;
+                        });
+                        Err(HydraError::from(e))
+                    }
+                }
+            });
+            Mono::delay(1000.millis()).await;
+        }
     }
 
     #[task(priority = 3, shared = [&em, rtc])]

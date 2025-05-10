@@ -6,6 +6,7 @@
 //! here.
 //!
 
+pub mod drivers;
 mod error;
 mod logging;
 mod sd_manager;
