@@ -372,15 +372,12 @@ mod app {
     async fn baro_read(mut cx: baro_read::Context) {
         let baro = cx.local.baro; // Get mutable access to the driver
         loop {
-            info!("Starting barometer reading cycle");
             cx.shared.em.run(|| {
                 // Choose the desired Oversampling Ratio for this reading
                 let osr = OversamplingRatio::Osr512; // Example: Highest precision
-                info!("Baro: Using OSR: {}", osr as u8);
 
                 match baro.read_pressure_temperature(osr) {
                     Ok((temp_c, press_kpa)) => {
-                        info!("Baro: Driver output - Temp: {} C, Pressure: {} kPa", temp_c, press_kpa);
                         cx.shared.data_manager.lock(|dm| {
                             dm.baro_temperature = Some(temp_c);
                             dm.baro_pressure = Some(press_kpa);
