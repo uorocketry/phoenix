@@ -168,7 +168,7 @@ impl RadioManager {
             mavlink::MavlinkVersion::V2,
             mav_header,
             &mav_message,
-        ).unwrap();
+        )?;
         Ok(())
     }
     pub fn increment_mav_sequence(&mut self) -> u8 {
