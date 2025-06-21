@@ -60,8 +60,6 @@ mod app {
         //     PA4<Output<PushPull>>,
         // >,
         radio_manager: RadioManager,
-        can_command_manager: CanCommandManager,
-        can_data_manager: CanDataManager,
         sbg_power: PB4<Output<PushPull>>,
         rtc: rtc::Rtc,
     }
@@ -113,38 +111,17 @@ mod app {
         // RCC
         let mut rcc = ctx.device.RCC.constrain();
         let reset = rcc.get_reset_reason();
-        let fdcan_prec_unsafe = unsafe { rcc.steal_peripheral_rec() }
-            .FDCAN
-            .kernel_clk_mux(rec::FdcanClkSel::Pll1Q);
+        
+        // WARNING turns out it's actually unsafe, not unsafe on HYDRA thought? 🤔
+        // let fdcan_prec_unsafe = unsafe { rcc.steal_peripheral_rec() }
+        //     .FDCAN
+        //     .kernel_clk_mux(rec::FdcanClkSel::Pll1Q);
 
         let ccdr = rcc
             .use_hse(48.MHz()) // check the clock hardware
             .sys_ck(200.MHz())
-            .pll1_strategy(rcc::PllConfigStrategy::Iterative)
-            .pll1_q_ck(32.MHz())
             .freeze(pwrcfg, &ctx.device.SYSCFG);
         info!("RCC configured");
-        let fdcan_prec = ccdr
-            .peripheral
-            .FDCAN
-            .kernel_clk_mux(rec::FdcanClkSel::Pll1Q);
-
-        let btr = NominalBitTiming {
-            prescaler: NonZeroU16::new(10).unwrap(),
-            seg1: NonZeroU8::new(13).unwrap(),
-            seg2: NonZeroU8::new(2).unwrap(),
-            sync_jump_width: NonZeroU8::new(1).unwrap(),
-        };
-
-        // let data_bit_timing = DataBitTiming {
-        //     prescaler: NonZeroU8::new(10).unwrap(),
-        //     seg1: NonZeroU8::new(13).unwrap(),
-        //     seg2: NonZeroU8::new(2).unwrap(),
-        //     sync_jump_width: NonZeroU8::new(4).unwrap(),
-        //     transceiver_delay_compensation: true,
-        // };
-
-        info!("CAN enabled");
         // GPIO
         let gpioa = ctx.device.GPIOA.split(ccdr.peripheral.GPIOA);
         let gpiod = ctx.device.GPIOD.split(ccdr.peripheral.GPIOD);
@@ -163,91 +140,7 @@ mod app {
         info!("PWM enabled");
         // assert_eq!(ccdr.clocks.pll1_q_ck().unwrap().raw(), 32_000_000);
         info!("PLL1Q:");
-        // https://github.com/stm32-rs/stm32h7xx-hal/issues/369 This needs to be stolen. Grrr I hate the imaturity of the stm32-hal
-        let can2: fdcan::FdCan<
-            stm32h7xx_hal::can::Can<stm32h7xx_hal::pac::FDCAN2>,
-            fdcan::ConfigMode,
-        > = {
-            let rx = gpiob.pb12.into_alternate().speed(Speed::VeryHigh);
-            let tx = gpiob.pb13.into_alternate().speed(Speed::VeryHigh);
-            ctx.device.FDCAN2.fdcan(tx, rx, fdcan_prec)
-        };
-
-        let mut can_data = can2;
-        can_data.set_protocol_exception_handling(false);
-
-        can_data.set_nominal_bit_timing(btr);
-
-        // can_data.set_automatic_retransmit(false); // data can be dropped due to its volume.
-
-        // can_command.set_data_bit_timing(data_bit_timing);
-
-        can_data.set_standard_filter(
-            StandardFilterSlot::_0,
-            StandardFilter::accept_all_into_fifo0(),
-        );
-
-        can_data.set_standard_filter(
-            StandardFilterSlot::_1,
-            StandardFilter::accept_all_into_fifo0(),
-        );
-
-        can_data.set_standard_filter(
-            StandardFilterSlot::_2,
-            StandardFilter::accept_all_into_fifo0(),
-        );
-
-        can_data.enable_interrupt(fdcan::interrupt::Interrupt::RxFifo0NewMsg);
-
-        can_data.enable_interrupt_line(fdcan::interrupt::InterruptLine::_0, true);
-
-        let config = can_data
-            .get_config()
-            .set_frame_transmit(fdcan::config::FrameTransmissionConfig::AllowFdCanAndBRS);
-        can_data.apply_config(config);
-
-        let can_data_manager = CanDataManager::new(can_data.into_normal());
-
-        let can1: fdcan::FdCan<
-            stm32h7xx_hal::can::Can<stm32h7xx_hal::pac::FDCAN1>,
-            fdcan::ConfigMode,
-        > = {
-            let rx = gpioa.pa11.into_alternate().speed(Speed::VeryHigh);
-            let tx = gpioa.pa12.into_alternate().speed(Speed::VeryHigh);
-            ctx.device.FDCAN1.fdcan(tx, rx, fdcan_prec_unsafe)
-        };
-
-        let mut can_command = can1;
-        can_command.set_protocol_exception_handling(false);
-
-        can_command.set_nominal_bit_timing(btr);
-        can_command.set_standard_filter(
-            StandardFilterSlot::_0,
-            StandardFilter::accept_all_into_fifo0(),
-        );
-
-        can_command.set_standard_filter(
-            StandardFilterSlot::_1,
-            StandardFilter::accept_all_into_fifo0(),
-        );
-
-        can_command.set_standard_filter(
-            StandardFilterSlot::_2,
-            StandardFilter::accept_all_into_fifo0(),
-        );
-
-        // can_data.set_data_bit_timing(data_bit_timing);
-        can_command.enable_interrupt(fdcan::interrupt::Interrupt::RxFifo0NewMsg);
-
-        can_command.enable_interrupt_line(fdcan::interrupt::InterruptLine::_0, true);
-
-        let config = can_command
-            .get_config()
-            .set_frame_transmit(fdcan::config::FrameTransmissionConfig::AllowFdCanAndBRS); // check this maybe don't bit switch allow.
-        can_command.apply_config(config);
-
-        let can_command_manager = CanCommandManager::new(can_command.into_normal());
-
+        
         // let spi_sd: stm32h7xx_hal::spi::Spi<
         //     stm32h7xx_hal::stm32::SPI1,
         //     stm32h7xx_hal::spi::Enabled,
@@ -300,15 +193,15 @@ mod app {
 
         let baro = common_arm::drivers::ms5611::Ms5611::new(spi4, baro_cs, delay_tim).unwrap();
 
-        // UART for sbg
-        let tx: Pin<'D', 1, Alternate<8>> = gpiod.pd1.into_alternate();
-        let rx: Pin<'D', 0, Alternate<8>> = gpiod.pd0.into_alternate();
+        // UART for radio
+        let tx = gpioe.pe8.into_alternate();
+        let rx = gpioe.pe7.into_alternate();
 
         // let stream_tuple = StreamsTuple::new(ctx.device.DMA1, ccdr.peripheral.DMA1);
         let uart_radio = ctx
             .device
-            .UART4
-            .serial((tx, rx), 57600.bps(), ccdr.peripheral.UART4, &ccdr.clocks)
+            .UART7
+            .serial((tx, rx), 57600.bps(), ccdr.peripheral.UART7, &ccdr.clocks)
             .unwrap();
         // let mut sbg_manager = sbg_manager::SBGManager::new(uart_sbg, stream_tuple);
 
@@ -337,12 +230,12 @@ mod app {
         data_manager.set_reset_reason(reset);
         let em = ErrorManager::new();
         blink::spawn().ok();
-        send_data_internal::spawn(r).ok();
         reset_reason_send::spawn().ok();
         state_send::spawn().ok();
         baro_read::spawn().ok();
-        // generate_random_messages::spawn().ok();
+        generate_random_messages::spawn().ok();
         // sensor_send::spawn().ok();
+        
         info!("Online");
 
         (
@@ -352,8 +245,6 @@ mod app {
                 em,
                 // sd_manager,
                 radio_manager,
-                can_command_manager,
-                can_data_manager,
                 sbg_power,
                 rtc,
             },
@@ -405,7 +296,13 @@ mod app {
                 let message = Message::new(
                     cx.shared
                         .rtc
-                        .lock(|rtc| messages::FormattedNaiveDateTime(rtc.date_time().unwrap())),
+                        // .lock(|rtc| messages::FormattedNaiveDateTime(rtc.date_time().unwrap())),
+                        .lock(|rtc| messages::FormattedNaiveDateTime(
+                            NaiveDate::from_ymd_opt(2001, 1, 1)
+                                .unwrap()
+                                .and_hms_opt(0, 0, 0)
+                                .unwrap(),
+                        )),
                     COM_ID,
                     messages::state::State::new(messages::state::StateData::Initializing),
                 );
@@ -413,7 +310,7 @@ mod app {
                 // spawn!(send_data_internal, message)?;
                 Ok(())
             });
-            Mono::delay(1.secs()).await;
+            Mono::delay(50.millis()).await;
         }
     }
 
@@ -442,7 +339,13 @@ mod app {
                 let message = messages::Message::new(
                     cx.shared
                         .rtc
-                        .lock(|rtc| messages::FormattedNaiveDateTime(rtc.date_time().unwrap())),
+                        // .lock(|rtc| messages::FormattedNaiveDateTime(rtc.date_time().unwrap())),
+                        .lock(|rtc| messages::FormattedNaiveDateTime(
+                            NaiveDate::from_ymd_opt(2001, 1, 1)
+                                .unwrap()
+                                .and_hms_opt(0, 0, 0)
+                                .unwrap(),
+                        )),
                     COM_ID,
                     sensor::Sensor::new(x),
                 );
@@ -538,15 +441,6 @@ mod app {
         });
     }
 
-    #[task(priority = 2, binds = FDCAN1_IT0, shared = [can_command_manager, data_manager, &em])]
-    fn can_command(mut cx: can_command::Context) {
-        // info!("CAN Command");
-        cx.shared.can_command_manager.lock(|can| {
-            cx.shared
-                .data_manager
-                .lock(|data_manager| cx.shared.em.run(|| can.process_data(data_manager)));
-        })
-    }
 
     #[task(priority = 3, shared = [sbg_power])]
     async fn sbg_power_on(mut cx: sbg_power_on::Context) {
@@ -567,60 +461,16 @@ mod app {
 
         cx.shared.radio_manager.lock(|radio_manager| {
             cx.shared.em.run(|| {
-                // info!("Sending message {}", m);
+                info!("Sending message {}", m);
                 let mut buf = [0; 255];
                 let data = postcard::to_slice(&m, &mut buf)?;
                 radio_manager.send_message(data)?;
+                info!("Send message called");
                 Ok(())
             })
         });
     }
 
-    #[task(priority = 3, binds = FDCAN2_IT0, shared = [&em, can_data_manager, data_manager, madgwick_service])]
-    fn can_data(mut cx: can_data::Context) {
-        cx.shared.can_data_manager.lock(|can| {
-            while let Ok(Some(message)) = can.receive_message() {
-                // process IMU data through madgwick service
-                cx.shared.madgwick_service.lock(|madgwick| {
-                    if let Some(result) = madgwick.process_imu_data(&message) {
-                        cx.shared.data_manager.lock(|dm| {
-                            dm.store_madgwick_result(result);
-                        });
-                    }
-                });
-            }
-            cx.shared.em.run(|| Ok(()))
-        });
-    }
-
-    #[task(priority = 2, shared = [&em, can_data_manager, data_manager])]
-    async fn send_data_internal(
-        mut cx: send_data_internal::Context,
-        mut receiver: Receiver<'static, Message, DATA_CHANNEL_CAPACITY>,
-    ) {
-        loop {
-            if let Ok(m) = receiver.recv().await {
-                cx.shared.can_data_manager.lock(|can| {
-                    cx.shared.em.run(|| {
-                        can.send_message(m)?;
-                        Ok(())
-                    })
-                });
-            }
-        }
-    }
-
-    #[task(priority = 2, shared = [&em, can_command_manager, data_manager])]
-    async fn send_command_internal(mut cx: send_command_internal::Context, m: Message) {
-        // while let Ok(m) = receiver.recv().await {
-        cx.shared.can_command_manager.lock(|can| {
-            cx.shared.em.run(|| {
-                can.send_message(m)?;
-                Ok(())
-            })
-        });
-        // }
-    }
 
     #[task(priority = 1, local = [led_red, led_green, buzzer, buzzed: bool = false], shared = [&em])]
     async fn blink(cx: blink::Context) {

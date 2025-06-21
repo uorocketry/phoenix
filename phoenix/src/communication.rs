@@ -117,12 +117,12 @@ impl CanDataManager {
 }
 
 pub struct RadioDevice {
-    transmitter: stm32h7xx_hal::serial::Tx<stm32h7xx_hal::pac::UART4>,
-    pub receiver: PeekReader<stm32h7xx_hal::serial::Rx<stm32h7xx_hal::pac::UART4>>,
+    transmitter: stm32h7xx_hal::serial::Tx<stm32h7xx_hal::pac::UART7>,
+    pub receiver: PeekReader<stm32h7xx_hal::serial::Rx<stm32h7xx_hal::pac::UART7>>,
 }
 
 impl RadioDevice {
-    pub fn new(uart: stm32h7xx_hal::serial::Serial<stm32h7xx_hal::pac::UART4>) -> Self {
+    pub fn new(uart: stm32h7xx_hal::serial::Serial<stm32h7xx_hal::pac::UART7>) -> Self {
         let (tx, mut rx) = uart.split();
 
         rx.listen();
@@ -168,7 +168,7 @@ impl RadioManager {
             mavlink::MavlinkVersion::V2,
             mav_header,
             &mav_message,
-        )?;
+        ).unwrap();
         Ok(())
     }
     pub fn increment_mav_sequence(&mut self) -> u8 {
