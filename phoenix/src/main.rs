@@ -95,7 +95,7 @@ mod app {
         // PF_07 for SCK
         // PF_08 for MISO
         // PF_09 for MOSI
-        imu: Iim20670<
+        imu: common_arm::drivers::iim20670::Iim20670<
             stm32h7xx_hal::spi::Spi<stm32h7xx_hal::pac::SPI5, stm32h7xx_hal::spi::Enabled>,
             stm32h7xx_hal::gpio::Pin<
                 'F',
@@ -337,7 +337,7 @@ mod app {
         let delay_tim3 = stm32h7xx_hal::delay::DelayFromCountDownTimer::new(timer3);
 
         // Initialize IMU with validation
-        let imu = Iim20670::new_with_validation(spi5, imu_cs, delay_tim3)
+        let imu = common_arm::drivers::iim20670::Iim20670::new_with_validation(spi5, imu_cs, delay_tim3)
             .expect("Failed to initialize IMU");
 
         info!("IMU initialized successfully");
@@ -433,8 +433,7 @@ mod app {
                                 dm.imu_quaternion = Some(quaternion);
                             });
                         });
-                        
-                        info!("IMU: gyro=({:.2}, {:.2}, {:.2}) accel=({:.2}, {:.2}, {:.2}) temp={:.2}°C", 
+                        info!("IMU: gyro=({}, {}, {}) accel=({}, {}, {}) temp={}°C",
                               gyro[0], gyro[1], gyro[2],
                               accel[0], accel[1], accel[2],
                               imu_data.temp);

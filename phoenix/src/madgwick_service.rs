@@ -3,6 +3,11 @@ use messages::{Message, sensor::{self, SbgData, EkfQuat}};
 use messages::sensor::Sensor;
 use messages::sensor_status::EkfStatus;
 
+// Import Float trait - needed for sqrt() method in no_std 
+// Removing this causes an error when running `cargo build`
+#[allow(unused_imports)]
+use m::Float;
+
 /// Service that implements the Madgwick sensor fusion algorithm for orientation
 /// This service processes IMU data (accelerometer and gyroscope)
 pub struct MadgwickService {
