@@ -3,6 +3,7 @@ use messages::command::RadioRate;
 use messages::state::StateData;
 use messages::Message;
 use stm32h7xx_hal::rcc::ResetReason;
+
 #[derive(Clone)]
 pub struct DataManager {
     pub air: Option<Message>,
@@ -27,6 +28,11 @@ pub struct DataManager {
     // Barometer
     pub baro_temperature: Option<f32>,
     pub baro_pressure: Option<f32>,
+    // IMU
+    pub imu_gyro: Option<[f32; 3]>,      // [x, y, z]
+    pub imu_accel: Option<[f32; 3]>,     // [x, y, z]
+    pub imu_temperature: Option<f32>,
+    pub imu_quaternion: Option<[f32; 4]>, // [w, x, y, z] from filters
 }
 
 impl DataManager {
@@ -53,6 +59,10 @@ impl DataManager {
             nav_pos_l1h: None,
             baro_temperature: None,
             baro_pressure: None,
+            imu_gyro: None,
+            imu_accel: None,
+            imu_temperature: None,
+            imu_quaternion: None,
         }
     }
 
@@ -119,6 +129,7 @@ impl DataManager {
         }
         Ok(())
     }
+
     pub fn handle_data(&mut self, data: Message) {
         match data.data {
             messages::Data::Sensor(ref sensor) => match sensor.data {
@@ -185,8 +196,24 @@ impl DataManager {
             _ => {}
         }
     }
+
     pub fn store_madgwick_result(&mut self, result: Message) {
         self.madgwick_quat = Some(result);
+    }
+
+    /// Store IMU sensor readings 
+    pub fn store_imu_data(&mut self, gyro: [f32; 3], accel: [f32; 3], temperature: f32) {
+        self.imu_gyro = Some(gyro);
+        self.imu_accel = Some(accel);
+        self.imu_temperature = Some(temperature);
+    }
+
+    /// Clear IMU data on error 
+    pub fn clear_imu_data(&mut self) {
+        self.imu_gyro = None;
+        self.imu_accel = None;
+        self.imu_temperature = None;
+        self.imu_quaternion = None;
     }
 }
 
