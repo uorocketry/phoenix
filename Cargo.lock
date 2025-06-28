@@ -1220,10 +1220,10 @@ checksum = "32a282da65faaf38286cf3be983213fcf1d2e2a58700e808f83f4ea9a4804bc0"
 [[package]]
 name = "messages-prost"
 version = "0.1.0"
+source = "git+https://github.com/uorocketry/messages-prost?branch=add-messages#c7a459711ff8fc60a529be42406ddb71832f4f76"
 dependencies = [
  "bitflags 2.9.1",
- "defmt 0.3.100",
- "heapless 0.8.0",
+ "heapless 0.7.17",
  "mavlink",
  "prost",
  "prost-build",

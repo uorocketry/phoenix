@@ -69,9 +69,8 @@ default-features = false
 version = "0.5.0"
 
 [workspace.dependencies.messages-prost]
-#git = "https://github.com/uorocketry/messages-prost"
-#branch = "add-messages"
-path = "/home/bonjour/Rocketry/messages-prost/"
+git = "https://github.com/uorocketry/messages-prost"
+branch = "add-messages"
 
 [workspace.dependencies.defmt-test]
 version = "0.3.2"
