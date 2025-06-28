@@ -19,7 +19,7 @@ features = ["derive"]
 
 [workspace.dependencies.cortex-m]
 version = "0.7.6"
-features = ["critical-section-single-core"]
+features = ["inline-asm", "critical-section-single-core"]
 
 [workspace.dependencies.cortex-m-rt]
 version = "0.7.1"
@@ -62,16 +62,27 @@ git = "https://github.com/uorocketry/chrono"
 default-features = false
 
 [workspace.dependencies.heapless]
-version = "0.7.16"
+version = "0.8"
+default-features = false
 
 [workspace.dependencies.embedded-alloc]
 version = "0.5.0"
 
-[workspace.dependencies.messages]
-git = "https://github.com/uorocketry/messages"
+[workspace.dependencies.messages-prost]
+git = "https://github.com/uorocketry/messages-prost"
+branch = "add-messages"
 
 [workspace.dependencies.defmt-test]
 version = "0.3.2"
 
 [workspace.dependencies.madgwick]
 version = "0.1.1"
+
+[workspace.dependencies.prost]
+version = "0.14.1"
+default-features = false
+features = ["derive"] 
+
+[workspace.dependencies.prost-types]
+version = "0.14.1" 
+default-features = false 

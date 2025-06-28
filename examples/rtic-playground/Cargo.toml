@@ -21,7 +21,7 @@ rtic-sync = { workspace = true }
 defmt-rtt = { workspace = true }
 panic-probe = { workspace = true }
 chrono = { workspace = true }
-messages = {workspace = true}
+messages-prost = {workspace = true}
 
 [[bin]]
 name = "rtic-playground"

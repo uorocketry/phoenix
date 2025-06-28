@@ -1,4 +1,4 @@
-use messages::{Event, Log, LogLevel};
+use messages_prost::log::{Event, Log, LogLevel};
 
 static mut GROUND_STATION_CALLBACK: Option<fn(Log)> = None;
 
