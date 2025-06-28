@@ -1,6 +1,6 @@
 // use atsamd_hal::dmac;
 use core::convert::Infallible;
-use defmt::{write, Format};
+use defmt::write;
 use derive_more::From;
 use embedded_sdmmc as sd;
 use nb::Error as NbError;

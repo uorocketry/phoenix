@@ -131,7 +131,6 @@ impl From<SbgLogEkfNavData> for (EkfNav1, EkfNav2, EkfNavAcc) {
         EkfNav {
             time_stamp: value.timeStamp,
             velocity: check(&flags, EkfFlags::VelocityValid, value.velocity),
-            undulation: check(&flags, EkfFlags::AttitudeValid, value.undulation),
             position: check(&flags, EkfFlags::PositionValid, value.position),
             velocity_std_dev: check(&flags, EkfFlags::VelocityValid, value.velocityStdDev),
             position_std_dev: check(&flags, EkfFlags::PositionValid, value.positionStdDev),
@@ -168,9 +167,10 @@ impl From<SbgLogGpsVel> for GpsVel {
             time_of_week: if valid { Some(value.timeOfWeek) } else { None },
             status,
             velocity: if valid { Some(value.velocity) } else { None },
-            course: if valid { Some(value.course) } else { None },
             velocity_acc: if valid { Some(value.velocityAcc) } else { None },
-            course_acc: if valid { Some(value.courseAcc) } else { None },
+            accuracy: if valid { Some(value.accuracy) } else { None },
+            heading: if valid { Some(value.heading) } else { None },
+            heading_acc: if valid { Some(value.headingAcc) } else { None },
         }
     }
 }

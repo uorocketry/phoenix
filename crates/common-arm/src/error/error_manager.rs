@@ -4,7 +4,6 @@ use core::sync::atomic::AtomicBool;
 use core::sync::atomic::Ordering::Relaxed;
 use cortex_m::interrupt;
 use cortex_m::interrupt::Mutex;
-use defmt::error;
 use heapless::HistoryBuffer;
 
 /// Central error management for HYDRA. A single instance of this should be created for each board.
