@@ -1,5 +1,10 @@
 use crate::bindings::{
-    self, _SbgDebugLogType_SBG_DEBUG_LOG_TYPE_WARNING, _SbgEComLog_SBG_ECOM_LOG_AIR_DATA, _SbgEComLog_SBG_ECOM_LOG_EKF_NAV, _SbgEComLog_SBG_ECOM_LOG_GPS1_POS, _SbgEComLog_SBG_ECOM_LOG_GPS1_RAW, _SbgEComLog_SBG_ECOM_LOG_GPS1_VEL, _SbgEComLog_SBG_ECOM_LOG_UTC_TIME, _SbgEComOutputMode_SBG_ECOM_OUTPUT_MODE_DIV_40, _SbgErrorCode_SBG_NO_ERROR, _SbgErrorCode_SBG_NULL_POINTER, _SbgErrorCode_SBG_READ_ERROR, _SbgErrorCode_SBG_WRITE_ERROR, sbgEComCmdOutputSetConf, sbgEComHandle
+    self, _SbgDebugLogType_SBG_DEBUG_LOG_TYPE_WARNING, _SbgEComLog_SBG_ECOM_LOG_AIR_DATA,
+    _SbgEComLog_SBG_ECOM_LOG_EKF_NAV, _SbgEComLog_SBG_ECOM_LOG_GPS1_POS,
+    _SbgEComLog_SBG_ECOM_LOG_GPS1_RAW, _SbgEComLog_SBG_ECOM_LOG_GPS1_VEL,
+    _SbgEComLog_SBG_ECOM_LOG_UTC_TIME, _SbgEComOutputMode_SBG_ECOM_OUTPUT_MODE_DIV_40,
+    _SbgErrorCode_SBG_NO_ERROR, _SbgErrorCode_SBG_NULL_POINTER, _SbgErrorCode_SBG_READ_ERROR,
+    _SbgErrorCode_SBG_WRITE_ERROR, sbgEComCmdOutputSetConf, sbgEComHandle,
 };
 use crate::bindings::{
     _SbgBinaryLogData, _SbgDebugLogType, _SbgEComClass_SBG_ECOM_CLASS_LOG_ECOM_0, _SbgEComHandle,
@@ -7,14 +12,14 @@ use crate::bindings::{
     _SbgEComOutputPort_SBG_ECOM_OUTPUT_PORT_A, _SbgEComProtocol, _SbgErrorCode, _SbgInterface,
 };
 use core::ffi::c_void;
+use core::ffi::CStr;
 use core::ptr::null_mut;
 use core::slice::{from_raw_parts, from_raw_parts_mut};
 use core::sync::atomic::AtomicUsize;
-use defmt::{flush, debug, info, warn, error};
+use defmt::{debug, error, flush, info, warn};
 use embedded_hal::serial::Write;
 use heapless::Deque;
 use heapless::Vec;
-use core::ffi::CStr;
 use messages::sensor::*;
 
 /**
@@ -116,8 +121,6 @@ impl SBG {
             numTrials: 3,
             cmdDefaultTimeOut: 500,
         };
-
-
 
         let isInitialized = false;
 
@@ -387,10 +390,8 @@ impl SBG {
                         _SbgEComLog_SBG_ECOM_LOG_GPS1_VEL => {
                             callback(CallbackData::GpsVel((*pLogData).gpsVelData.into()))
                         }
-                        _SbgEComLog_SBG_ECOM_LOG_GPS1_HDT => {
-                        }
-                        _ => {
-                        },
+                        _SbgEComLog_SBG_ECOM_LOG_GPS1_HDT => {}
+                        _ => {}
                     }
                 }
             }
@@ -501,9 +502,7 @@ pub extern "C" fn sbgGetTime() -> u32 {
     // SAFETY: We are accessing a static mut variable.
     // This is safe because this is the only place where we access the RTC.
     match unsafe { RTC_GET_TIME } {
-        Some(get_time) => {
-            get_time()
-        }
+        Some(get_time) => get_time(),
         None => 0,
     }
 }

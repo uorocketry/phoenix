@@ -3,11 +3,11 @@ use core::convert::Infallible;
 use defmt::{write, Format};
 use derive_more::From;
 use embedded_sdmmc as sd;
-use messages::ErrorContext;
 use nb::Error as NbError;
 
 use crate::drivers::ms5611;
 /// Open up atsamd hal errors without including the whole crate.
+use messages_prost::common::ErrorContext;
 
 /// Contains all the various error types that can be encountered in the Hydra codebase. Extra errors
 /// types should be added to this list whenever needed.
@@ -24,8 +24,8 @@ pub enum HydraErrorType {
     /// Error from the Baro driver.
     BaroError(ms5611::Error<stm32h7xx_hal::spi::Error, core::convert::Infallible>),
     /// Error from the Mavlink library.
-    MavlinkError(messages::mavlink::error::MessageWriteError),
-    MavlinkReadError(messages::mavlink::error::MessageReadError),
+    MavlinkError(messages_prost::mavlink::error::MessageWriteError),
+    MavlinkReadError(messages_prost::mavlink::error::MessageReadError),
     NbError(NbError<Infallible>),
 }
 
@@ -62,7 +62,6 @@ impl defmt::Format for HydraErrorType {
 
 /// Standard HYDRA error. This type should be used as the return type for most functions that can
 /// fail and that returns a `Result`.
-#[derive(Format)]
 pub struct HydraError {
     error: HydraErrorType,
     context: Option<ErrorContext>,

@@ -13,7 +13,7 @@ use core::mem::MaybeUninit;
 use defmt::info;
 use embedded_alloc::Heap;
 use heapless::Vec;
-use messages::mavlink::embedded::Write;
+use messages_prost::mavlink::embedded::Write;
 use sbg_rs::sbg;
 use sbg_rs::sbg::{CallbackData, SBG, SBG_BUFFER_SIZE};
 use stm32h7xx_hal::dma::dma::StreamX;
