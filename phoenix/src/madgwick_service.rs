@@ -2,10 +2,6 @@ use heapless::HistoryBuffer;
 use madgwick::Marg;
 use messages_prost::sensor::madgwick::Madgwick;
 use messages_prost::sensor::madgwick::Quaternion;
-use messages_prost::sensor::sbg::EkfQuat;
-use messages_prost::sensor::sbg::EkfStatus;
-use messages_prost::sensor::sbg::Imu;
-use messages_prost::sensor::sbg::SbgData;
 /// Service that implements the Madgwick sensor fusion algorithim for orientation
 /// This service processes IMU data (accelerometer and gyroscope)
 pub struct MadgwickService {
@@ -50,13 +46,13 @@ impl MadgwickService {
         }; // "x: 1.0" represents the magnetometer pointing in the positive x-direction
 
         // Get initial quaternion from filter
-        let mut quat = (1.0, 0.0, 0.0, 0.0); // Default identity quaternion with no rotation
+        let _quat = (1.0, 0.0, 0.0, 0.0); // Default identity quaternion with no rotation
 
         // Apply multiple updates to ensure convergence, and stores the resulting quaternion after each update
         for _ in 0..5 {
             let updated_quat = madgwick.update(mag, gyro, accel);
             
-            quat_history.wirte(Quaternion {
+            quat_history.write(Quaternion {
                 w: updated_quat.0,
                 x: updated_quat.1, 
                 y: updated_quat.2,
@@ -66,7 +62,7 @@ impl MadgwickService {
 
         Self {
             madgwick,
-            quat_history, // Use the quaternion from the filter
+            quat_history, 
             beta,
             sample_period,
         }
@@ -96,38 +92,51 @@ impl MadgwickService {
         // Apply multiple updates to ensure convergence
         for _ in 0..5 {
             let quat = self.madgwick.update(mag, gyro, accel);
-            self.latest_quat = (quat.0, quat.1, quat.2, quat.3);
+            self.quat_history.write(Quaternion { w: quat.0, x: quat.1, y: quat.2, z: quat.3 });
         }
     }
 
     /// Method for processing incoming IMU data; returns a new Message with an updated quaternion from the filter
-    pub fn process_imu_data(&mut self, data: &Imu) -> Option<Madgwick> {
-        let accel = data.accelerometers;
-        let gyro = data.gyroscopes;
-
+    pub fn process_imu_data(&mut self, data: &messages_prost::sensor::iim20670::Imu) -> Option<Madgwick> {
         let mag = madgwick::F32x3 {
             x: 0.0,
             y: 0.0,
             z: 0.0,
         };
-        let gyro = madgwick::F32x3 {
-            x: gyro[0],
-            y: gyro[1],
-            z: gyro[2],
-        };
 
-        let accel = madgwick::F32x3 {
-            x: accel[0],
-            y: accel[1],
-            z: accel[2],
-        };
 
-        let quat = self.madgwick.update(mag, gyro, accel);
+        if let Some(imu) = data.data {
+            if let Some(accel) = imu.accelerometer {
+                if let Some(gyros) = imu.gyroscope {
+                    let gyro = madgwick::F32x3 {
+                        x: gyros.x,
+                        y: gyros.y,
+                        z: gyros.z,
+                    };
 
-        self.quat_history.write(Madgwick { node: 3, data: quat });
+                    let accel = madgwick::F32x3 {
+                        x: accel.x,
+                        y: accel.y,
+                        z: accel.z,
+                    };
 
+                    let quat = self.madgwick.update(mag, gyro, accel);
+
+                    let prost_quat = Quaternion { w: quat.0, x: quat.1, y: quat.2, z: quat.3 };
+
+                    self.quat_history.write(prost_quat);
+
+                    return Some(
+                        Madgwick { node: 0, data: Some(prost_quat) }
+                    )
+                }
+            }
+            
+        } 
+
+        None
         // Store the latest quaternion
-        self.latest_quat = (quat.0, quat.1, quat.2, quat.3);
+        // self.latest_quat = (quat.0, quat.1, quat.2, quat.3);
 
         // match &data.data {
         //     messages::Data::Sensor(sensor) => match &sensor.data {
@@ -181,7 +190,7 @@ impl MadgwickService {
     }
 
     /// Method for getting the latest quaternion method
-    pub fn get_quaternion(&self) -> Option<&Madgwick> {
+    pub fn get_quaternion(&self) -> Option<&Quaternion> {
         self.quat_history.last()
     }
 
