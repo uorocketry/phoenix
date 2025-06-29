@@ -196,6 +196,7 @@ dependencies = [
  "defmt-rtt",
  "defmt-test",
  "derive_more",
+ "embassy-embedded-hal",
  "embassy-time",
  "embedded-hal 1.0.0",
  "embedded-hal-async",

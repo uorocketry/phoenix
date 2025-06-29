@@ -350,7 +350,7 @@
 
 //! Async driver for the MS5611 Barometric Pressure Sensor using embedded-hal v1.0.
 use embedded_hal_async::{delay::DelayNs, spi};
-
+use embedded_hal_async::spi::SpiDevice;
 // Command bytes remain the same.
 mod command {
     pub const RESET: u8 = 0x1E;
@@ -444,7 +444,7 @@ pub struct Ms5611<SPI, DELAY> {
 // The generic bounds now use the async traits from `embedded-hal-async`.
 impl<SPI, DELAY> Ms5611<SPI, DELAY>
 where
-    SPI: spi::SpiDevice,
+    SPI: SpiDevice,
     DELAY: DelayNs,
 {
     /// Creates a new async MS5611 driver instance.

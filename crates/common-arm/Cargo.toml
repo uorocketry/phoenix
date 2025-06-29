@@ -15,6 +15,7 @@ messages-prost = {workspace = true}
 nb = {workspace = true}
 panic-probe = { workspace = true }
 embassy-time = { version = "0.4.0", features = ["defmt", "defmt-timestamp-uptime", "tick-hz-32_768"] }
+embassy-embedded-hal = { version = "0.3.0" }
 embedded-hal-async = { version = "1.0" }
 embedded-nal-async = "0.8.0"
 embedded-io-async = { version = "0.6.1" }

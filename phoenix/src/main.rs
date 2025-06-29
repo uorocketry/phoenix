@@ -47,7 +47,7 @@ static SBG_CHANNEL: Channel<CriticalSectionRawMutex, SbgData, 10> = Channel::new
 static BUFFER_CHANNEL: Channel<CriticalSectionRawMutex, DmaBuffer, 2> = Channel::new();
 
 // The SPI bus is protected by a Mutex, so the RefCell is not needed.
-static SPI_BUS: StaticCell<Mutex<CriticalSectionRawMutex, Spi<mode::Async>>> = StaticCell::new();
+static SPI_BUS: StaticCell<embassy_sync::mutex::Mutex<CriticalSectionRawMutex, Spi<mode::Async>>> = StaticCell::new();
 
 // Static variable for the RTC
 pub static RTC: Mutex<CriticalSectionRawMutex, RefCell<Option<Rtc>>> =
@@ -172,7 +172,7 @@ async fn main(spawner: Spawner) {
     info!("SPI4 bus configured.");
 
     // Initialize the Mutex without the RefCell.
-    let spi_bus_mutex = SPI_BUS.init(Mutex::new(spi_bus));
+    let spi_bus_mutex = SPI_BUS.init(embassy_sync::mutex::Mutex::new(spi_bus));
 
     let baro_cs = Output::new(p.PE4, Level::High, Speed::VeryHigh);
     info!("Barometer CS pin configured.");
