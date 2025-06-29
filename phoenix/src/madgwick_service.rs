@@ -26,7 +26,7 @@ impl MadgwickService {
     pub fn new(beta: f32, sample_period: f32) -> Self {
         // Create the filter with specified parameters
         let mut madgwick = Marg::new(beta, sample_period);
-        let mut quat_history = HistoryBuffer::new(); 
+        let mut quat_history = HistoryBuffer::new();
 
         // Initialize with standard measurements
         let accel = madgwick::F32x3 {
@@ -51,10 +51,10 @@ impl MadgwickService {
         // Apply multiple updates to ensure convergence, and stores the resulting quaternion after each update
         for _ in 0..5 {
             let updated_quat = madgwick.update(mag, gyro, accel);
-            
+
             quat_history.write(Quaternion {
                 w: updated_quat.0,
-                x: updated_quat.1, 
+                x: updated_quat.1,
                 y: updated_quat.2,
                 z: updated_quat.3,
             });
@@ -62,7 +62,7 @@ impl MadgwickService {
 
         Self {
             madgwick,
-            quat_history, 
+            quat_history,
             beta,
             sample_period,
         }
@@ -92,18 +92,25 @@ impl MadgwickService {
         // Apply multiple updates to ensure convergence
         for _ in 0..5 {
             let quat = self.madgwick.update(mag, gyro, accel);
-            self.quat_history.write(Quaternion { w: quat.0, x: quat.1, y: quat.2, z: quat.3 });
+            self.quat_history.write(Quaternion {
+                w: quat.0,
+                x: quat.1,
+                y: quat.2,
+                z: quat.3,
+            });
         }
     }
 
     /// Method for processing incoming IMU data; returns a new Message with an updated quaternion from the filter
-    pub fn process_imu_data(&mut self, data: &messages_prost::sensor::iim20670::Imu) -> Option<Madgwick> {
+    pub fn process_imu_data(
+        &mut self,
+        data: &messages_prost::sensor::iim20670::Imu,
+    ) -> Option<Madgwick> {
         let mag = madgwick::F32x3 {
             x: 0.0,
             y: 0.0,
             z: 0.0,
         };
-
 
         if let Some(imu) = data.data {
             if let Some(accel) = imu.accelerometer {
@@ -122,17 +129,22 @@ impl MadgwickService {
 
                     let quat = self.madgwick.update(mag, gyro, accel);
 
-                    let prost_quat = Quaternion { w: quat.0, x: quat.1, y: quat.2, z: quat.3 };
+                    let prost_quat = Quaternion {
+                        w: quat.0,
+                        x: quat.1,
+                        y: quat.2,
+                        z: quat.3,
+                    };
 
                     self.quat_history.write(prost_quat);
 
-                    return Some(
-                        Madgwick { node: 0, data: Some(prost_quat) }
-                    )
+                    return Some(Madgwick {
+                        node: 0,
+                        data: Some(prost_quat),
+                    });
                 }
             }
-            
-        } 
+        }
 
         None
         // Store the latest quaternion

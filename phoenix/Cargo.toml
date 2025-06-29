@@ -11,7 +11,6 @@ cortex-m-rt = { workspace = true }
 rtic = { workspace = true }
 rtic-monotonics = { workspace = true }
 common-arm = { path = "../crates/common-arm" }
-stm32h7xx-hal = { workspace = true }
 postcard = { workspace = true }
 defmt = { workspace = true}
 fdcan = { workspace = true }

@@ -203,7 +203,6 @@ dependencies = [
  "nb 1.1.0",
  "panic-probe 0.3.2",
  "postcard",
- "stm32h7xx-hal",
 ]
 
 [[package]]
@@ -516,7 +515,7 @@ dependencies = [
 name = "embassy-playground"
 version = "0.1.0"
 dependencies = [
- "chrono 0.4.38",
+ "chrono 0.4.41",
  "cortex-m",
  "cortex-m-rt",
  "critical-section",
@@ -1340,7 +1339,7 @@ dependencies = [
 name = "phoenix"
 version = "0.1.0"
 dependencies = [
- "chrono 0.4.38",
+ "chrono 0.4.41",
  "common-arm",
  "cortex-m",
  "cortex-m-rt",
@@ -1377,7 +1376,6 @@ dependencies = [
  "sbg-rs",
  "static_cell",
  "stm32-fmc",
- "stm32h7xx-hal",
 ]
 
 [[package]]
@@ -1798,7 +1796,7 @@ checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
 name = "simple-playground"
 version = "0.1.0"
 dependencies = [
- "chrono 0.4.38",
+ "chrono 0.4.41",
  "common-arm",
  "cortex-m",
  "cortex-m-rt",
