@@ -1314,7 +1314,7 @@ checksum = "32a282da65faaf38286cf3be983213fcf1d2e2a58700e808f83f4ea9a4804bc0"
 [[package]]
 name = "messages-prost"
 version = "0.1.0"
-source = "git+https://github.com/uorocketry/messages-prost?branch=add-messages#0e1ba82cecbeef935d56cdd90fb0d524a6a29dd3"
+source = "git+https://github.com/uorocketry/messages-prost?branch=add-messages#ff16713e2c6ad6baec90c133d7efcbfaa7aaf66b"
 dependencies = [
  "bitflags 2.9.1",
  "defmt 0.3.100",
