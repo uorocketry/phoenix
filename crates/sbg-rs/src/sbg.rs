@@ -17,7 +17,6 @@ use core::ptr::null_mut;
 use core::slice::{from_raw_parts, from_raw_parts_mut};
 use core::sync::atomic::AtomicUsize;
 use defmt::{debug, error, flush, info, warn};
-use embedded_hal::serial::Write;
 use heapless::Deque;
 use heapless::Vec;
 use messages_prost::sensor::sbg::*;

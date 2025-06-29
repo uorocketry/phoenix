@@ -193,15 +193,18 @@ version = "0.1.0"
 dependencies = [
  "cortex-m",
  "defmt 0.3.100",
- "defmt-rtt 0.4.2",
+ "defmt-rtt",
  "defmt-test",
  "derive_more",
- "embedded-hal 0.2.7",
- "embedded-sdmmc",
+ "embassy-time",
+ "embedded-hal 1.0.0",
+ "embedded-hal-async",
+ "embedded-io-async",
+ "embedded-nal-async",
  "heapless 0.7.17",
  "messages-prost",
  "nb 1.1.0",
- "panic-probe 0.3.2",
+ "panic-probe",
  "postcard",
 ]
 
@@ -352,16 +355,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "defmt-rtt"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b2cac3b8a5644a9e02b75085ebad3b6deafdbdbdec04bb25086523828aa4dfd1"
-dependencies = [
- "critical-section",
- "defmt 1.0.1",
-]
-
-[[package]]
 name = "defmt-test"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -420,7 +413,7 @@ checksum = "41fea5ef5bed4d3468dfd44f5c9fa4cda8f54c86d4fb4ae683eacf9d39e2ea12"
 dependencies = [
  "defmt 0.3.100",
  "embassy-futures",
- "embassy-sync 0.6.2",
+ "embassy-sync",
  "embassy-time",
  "embedded-hal 0.2.7",
  "embedded-hal 1.0.0",
@@ -482,7 +475,7 @@ dependencies = [
  "defmt 0.3.100",
  "document-features",
  "embassy-net-driver",
- "embassy-sync 0.6.2",
+ "embassy-sync",
  "embassy-time",
  "embedded-io-async",
  "embedded-nal-async",
@@ -508,39 +501,7 @@ checksum = "4818c32afec43e3cae234f324bad9a976c9aa7501022d26ff60a4017a1a006b7"
 dependencies = [
  "embassy-futures",
  "embassy-net-driver",
- "embassy-sync 0.6.2",
-]
-
-[[package]]
-name = "embassy-playground"
-version = "0.1.0"
-dependencies = [
- "chrono 0.4.41",
- "cortex-m",
- "cortex-m-rt",
- "critical-section",
- "defmt 1.0.1",
- "defmt-rtt 1.0.0",
- "embassy-embedded-hal",
- "embassy-executor",
- "embassy-futures",
- "embassy-net",
- "embassy-stm32",
- "embassy-sync 0.7.0",
- "embassy-time",
- "embassy-usb",
- "embedded-hal 0.2.7",
- "embedded-hal 1.0.0",
- "embedded-hal-async",
- "embedded-io-async",
- "embedded-nal-async",
- "embedded-storage",
- "grounded",
- "heapless 0.8.0",
- "micromath",
- "panic-probe 1.0.0",
- "static_cell",
- "stm32-fmc",
+ "embassy-sync",
 ]
 
 [[package]]
@@ -564,7 +525,7 @@ dependencies = [
  "embassy-futures",
  "embassy-hal-internal",
  "embassy-net-driver",
- "embassy-sync 0.6.2",
+ "embassy-sync",
  "embassy-time",
  "embassy-time-driver",
  "embassy-time-queue-utils",
@@ -601,21 +562,6 @@ dependencies = [
  "cfg-if",
  "critical-section",
  "defmt 0.3.100",
- "embedded-io-async",
- "futures-sink",
- "futures-util",
- "heapless 0.8.0",
-]
-
-[[package]]
-name = "embassy-sync"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cef1a8a1ea892f9b656de0295532ac5d8067e9830d49ec75076291fd6066b136"
-dependencies = [
- "cfg-if",
- "critical-section",
- "defmt 1.0.1",
  "embedded-io-async",
  "futures-sink",
  "futures-util",
@@ -667,7 +613,7 @@ dependencies = [
  "defmt 0.3.100",
  "embassy-futures",
  "embassy-net-driver-channel",
- "embassy-sync 0.6.2",
+ "embassy-sync",
  "embassy-usb-driver",
  "heapless 0.8.0",
  "ssmarshal",
@@ -691,7 +637,7 @@ checksum = "08e753b23799329780c7ac434264026d0422044d6649ed70a73441b14a6436d7"
 dependencies = [
  "critical-section",
  "defmt 0.3.100",
- "embassy-sync 0.6.2",
+ "embassy-sync",
  "embassy-usb-driver",
 ]
 
@@ -805,18 +751,6 @@ checksum = "76959917cd2b86f40a98c28dd5624eddd1fa69d746241c8257eac428d83cb211"
 dependencies = [
  "embedded-io-async",
  "embedded-nal",
-]
-
-[[package]]
-name = "embedded-sdmmc"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6d3bf0a2b5becb87e9a329d9290f131e4d10fec39b56d129926826a7cbea1e7a"
-dependencies = [
- "byteorder",
- "embedded-hal 0.2.7",
- "log",
- "nb 0.1.3",
 ]
 
 [[package]]
@@ -1206,8 +1140,8 @@ source = "git+https://github.com/uorocketry/rust-mavlink.git#e9f4057deedce85cae5
 dependencies = [
  "byteorder",
  "crc-any",
- "embedded-hal 0.2.7",
- "nb 1.1.0",
+ "embedded-io",
+ "embedded-io-async",
 ]
 
 [[package]]
@@ -1219,6 +1153,7 @@ checksum = "32a282da65faaf38286cf3be983213fcf1d2e2a58700e808f83f4ea9a4804bc0"
 [[package]]
 name = "messages-prost"
 version = "0.1.0"
+source = "git+https://github.com/uorocketry/messages-prost?branch=add-messages#e34d5dae9c611da8b80358e180f9550e90f381fd"
 dependencies = [
  "bitflags 2.9.1",
  "defmt 0.3.100",
@@ -1310,16 +1245,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "panic-probe"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fd402d00b0fb94c5aee000029204a46884b1262e0c443f166d86d2c0747e1a1a"
-dependencies = [
- "cortex-m",
- "defmt 1.0.1",
-]
-
-[[package]]
 name = "paste"
 version = "1.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1345,18 +1270,17 @@ dependencies = [
  "cortex-m-rt",
  "critical-section",
  "defmt 0.3.100",
- "defmt-rtt 0.4.2",
+ "defmt-rtt",
  "defmt-test",
  "embassy-embedded-hal",
  "embassy-executor",
  "embassy-futures",
  "embassy-net",
  "embassy-stm32",
- "embassy-sync 0.7.0",
+ "embassy-sync",
  "embassy-time",
  "embassy-usb",
  "embedded-alloc",
- "embedded-hal 0.2.7",
  "embedded-hal 1.0.0",
  "embedded-hal-async",
  "embedded-io-async",
@@ -1368,7 +1292,7 @@ dependencies = [
  "madgwick",
  "messages-prost",
  "micromath",
- "panic-probe 0.3.2",
+ "panic-probe",
  "postcard",
  "rtic",
  "rtic-monotonics",
@@ -1711,7 +1635,7 @@ dependencies = [
  "cortex-m",
  "cortex-m-rt",
  "defmt 0.3.100",
- "embedded-hal 0.2.7",
+ "embedded-hal 1.0.0",
  "heapless 0.7.17",
  "messages-prost",
  "nb 1.1.0",
@@ -1801,12 +1725,12 @@ dependencies = [
  "cortex-m",
  "cortex-m-rt",
  "defmt 0.3.100",
- "defmt-rtt 0.4.2",
+ "defmt-rtt",
  "embedded-alloc",
  "fdcan",
  "heapless 0.8.0",
  "messages-prost",
- "panic-probe 0.3.2",
+ "panic-probe",
  "postcard",
  "rtic",
  "rtic-monotonics",

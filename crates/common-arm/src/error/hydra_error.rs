@@ -2,7 +2,6 @@
 use core::convert::Infallible;
 use defmt::write;
 use derive_more::From;
-use embedded_sdmmc as sd;
 use nb::Error as NbError;
 
 use crate::drivers::ms5611;
@@ -19,8 +18,6 @@ pub enum HydraErrorType {
     PostcardError(postcard::Error),
     /// Error that occurred while spawning an RTIC task. Contains the name of the failed task.
     SpawnError(&'static str),
-    /// Error from the SD card library.
-    SdCardError(sd::Error<sd::SdMmcError>),
     /// Error from the Mavlink library.
     MavlinkError(messages_prost::mavlink::error::MessageWriteError),
     MavlinkReadError(messages_prost::mavlink::error::MessageReadError),
@@ -38,9 +35,6 @@ impl defmt::Format for HydraErrorType {
             }
             HydraErrorType::SpawnError(e) => {
                 write!(f, "Could not spawn task '{}'", e);
-            }
-            HydraErrorType::SdCardError(_) => {
-                write!(f, "SD card error!");
             }
             HydraErrorType::MavlinkError(_) => {
                 write!(f, "Mavlink error!");
