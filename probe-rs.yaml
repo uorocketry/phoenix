@@ -6,4 +6,4 @@ probe:
   # Enable faster flash operations
   flash_algorithm:
     enable_fast_program: true
-    enable_verify: false  # Skip verification for faster flashing 
+    enable_verify: true  # Skip verification for faster flashing 
