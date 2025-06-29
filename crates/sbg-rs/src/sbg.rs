@@ -20,7 +20,7 @@ use defmt::{debug, error, flush, info, warn};
 use embedded_hal::serial::Write;
 use heapless::Deque;
 use heapless::Vec;
-use messages::sensor::*;
+use messages_prost::sensor::sbg::*;
 
 /**
  * Max buffer size for SBG messages.
@@ -50,10 +50,10 @@ pub enum CallbackData {
     UtcTime(UtcTime),
     Air(Air),
     EkfQuat(EkfQuat),
-    EkfNav((EkfNav1, EkfNav2, EkfNavAcc)),
-    Imu((Imu1, Imu2)),
-    GpsVel((GpsVel, GpsVelAcc)),
-    GpsPos((GpsPos1, GpsPos2, GpsPosAcc)),
+    EkfNav(EkfNav),
+    Imu(Imu),
+    GpsVel(GpsVel),
+    GpsPos(GpsPos),
 }
 
 struct UARTSBGInterface {

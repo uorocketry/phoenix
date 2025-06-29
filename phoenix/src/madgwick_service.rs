@@ -1,6 +1,7 @@
 use heapless::HistoryBuffer;
 use madgwick::Marg;
 use messages_prost::sensor::madgwick::Madgwick;
+use messages_prost::sensor::madgwick::Quaternion;
 use messages_prost::sensor::sbg::EkfQuat;
 use messages_prost::sensor::sbg::EkfStatus;
 use messages_prost::sensor::sbg::Imu;
@@ -10,7 +11,7 @@ use messages_prost::sensor::sbg::SbgData;
 pub struct MadgwickService {
     madgwick: Marg,
     // Store the latest quaternions
-    quat_history: HistoryBuffer<Madgwick, 20>,
+    quat_history: HistoryBuffer<Quaternion, 20>,
     // Store configuration parameters
     beta: f32, // 'beta' is the filter gain parameter that determines how much the accelerometer influences the orientation estimation; the higher the value, the more weight the accelerometer data has
     sample_period: f32, // 'sample_period' is the time in seconds between sensor readings; it is reciprocal of the sensor sampling frequency
@@ -21,16 +22,15 @@ impl MadgwickService {
     const DEFAULT_BETA: f32 = 0.1;
     const DEFAULT_SAMPLE_PERIOD: f32 = 0.01; // 100Hz
 
-    /// Method for creating a new instance of 'MadgwickService' with default parameters
-    pub fn new() -> Self {
-        // Use the version with parameters but provide defaults incase we can't get parameters for some reason
-        Self::new_with_params(Self::DEFAULT_BETA, Self::DEFAULT_SAMPLE_PERIOD)
+    pub fn default() -> Self {
+        Self::new(Self::DEFAULT_BETA, Self::DEFAULT_SAMPLE_PERIOD)
     }
 
     /// New constructor that accepts parameters
-    pub fn new_with_params(beta: f32, sample_period: f32) -> Self {
+    pub fn new(beta: f32, sample_period: f32) -> Self {
         // Create the filter with specified parameters
         let mut madgwick = Marg::new(beta, sample_period);
+        let mut quat_history = HistoryBuffer::new(); 
 
         // Initialize with standard measurements
         let accel = madgwick::F32x3 {
@@ -55,17 +55,18 @@ impl MadgwickService {
         // Apply multiple updates to ensure convergence, and stores the resulting quaternion after each update
         for _ in 0..5 {
             let updated_quat = madgwick.update(mag, gyro, accel);
-            quat = (
-                updated_quat.0,
-                updated_quat.1,
-                updated_quat.2,
-                updated_quat.3,
-            );
+            
+            quat_history.wirte(Quaternion {
+                w: updated_quat.0,
+                x: updated_quat.1, 
+                y: updated_quat.2,
+                z: updated_quat.3,
+            });
         }
 
         Self {
             madgwick,
-            quat_history: HistoryBuffer::new(), // Use the quaternion from the filter
+            quat_history, // Use the quaternion from the filter
             beta,
             sample_period,
         }
@@ -123,7 +124,7 @@ impl MadgwickService {
 
         let quat = self.madgwick.update(mag, gyro, accel);
 
-        self.
+        self.quat_history.write(Madgwick { node: 3, data: quat });
 
         // Store the latest quaternion
         self.latest_quat = (quat.0, quat.1, quat.2, quat.3);
