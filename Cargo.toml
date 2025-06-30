@@ -66,6 +66,9 @@ default-features = false
 version = "0.8"
 default-features = false
 
+[workspace.dependencies.smlang]
+version = "0.8.0"
+
 [workspace.dependencies.embedded-alloc]
 version = "0.5.0"
 

@@ -1,8 +1,10 @@
+#![feature(impl_trait_in_assoc_type)]
 #![no_std]
 #![no_main]
 
 mod madgwick_service;
 mod sbg_manager;
+mod traits; 
 
 use core::cell::RefCell;
 use chrono::NaiveDate;
@@ -31,6 +33,7 @@ use common_arm::drivers::ms5611::{Ms5611, Oversampling};
 // Use the asynchronous SpiDevice from embassy-embedded-hal
 use embassy_embedded_hal::shared_bus::asynch::spi::SpiDevice;
 
+use smlang::statemachine;
 
 // =================================================================================
 // Shared Resources & Types
@@ -56,6 +59,15 @@ pub static RTC: Mutex<CriticalSectionRawMutex, RefCell<Option<Rtc>>> =
 bind_interrupts!(struct Irqs {
     UART7 => usart::InterruptHandler<peripherals::UART7>;
 });
+
+statemachine! {
+    transitions: {
+        *Init + Start = Idle,
+        WaitForLaunch + Launch = Ascent,
+        Fault + FaultCleared = Init,
+        _ + FaultDetected = Fault,
+    }
+}
 
 // =================================================================================
 // Application Tasks
@@ -94,7 +106,6 @@ async fn sbg_parser_task(tx: UartTx<'static, mode::Async>) {
     }
 }
 
-// The SpiDevice now wraps the Spi peripheral directly, without the RefCell.
 type BaroSpiDevice<'a> = SpiDevice<'a,
     CriticalSectionRawMutex,
     Spi<'a, mode::Async>,
@@ -181,11 +192,18 @@ async fn main(spawner: Spawner) {
     let baro_spi_device = SpiDevice::new(spi_bus_mutex, baro_cs);
     let baro = Ms5611::new(baro_spi_device, Delay).await.unwrap();
 
+    let state_machine = StateMachine::new(traits::Context {});
+
     // --- Spawning Tasks ---
     spawner.must_spawn(led_blinker_task(p.PB14));
     spawner.must_spawn(uart_dma_reader_task(ring_rx));
     spawner.must_spawn(sbg_parser_task(tx));
     spawner.must_spawn(baro_reader_task(baro));
 
-    info!("All tasks spawned. Main function is complete.");
+    loop {
+        // state machine loop
+        match state_machine.state {
+            
+        } 
+    }
 }
