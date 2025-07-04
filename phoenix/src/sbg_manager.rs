@@ -7,7 +7,6 @@ use core::ptr;
 // use crate::app::sbg_sd_task as sbg_sd;
 // use crate::app::sbg_write_data;
 use super::RTC;
-use super::UART_CHANNEL;
 use crate::SBG_CHANNEL;
 use chrono::NaiveDateTime;
 use core::mem::MaybeUninit;
@@ -79,12 +78,13 @@ pub fn sbg_get_time_millis_i64() -> i64 {
 }
 
 pub fn sbg_get_time() -> u32 {
-    // We get the full i64 timestamp first.
-    let timestamp_ms = sbg_get_time_millis_i64();
+    // // We get the full i64 timestamp first.
+    // let timestamp_ms = sbg_get_time_millis_i64();
 
-    // Convert to u32. This is a truncating cast.
-    // For positive timestamps, it's equivalent to `timestamp_ms % (u32::MAX as i64 + 1)`.
-    timestamp_ms as u32
+    // // Convert to u32. This is a truncating cast.
+    // // For positive timestamps, it's equivalent to `timestamp_ms % (u32::MAX as i64 + 1)`.
+    // timestamp_ms as u32
+    501
 }
 
 /// Publishes data to the SBG channel.
@@ -137,9 +137,9 @@ pub async fn sbg_sd_task(data: [u8; SBG_BUFFER_SIZE]) {
  */
 #[embassy_executor::task]
 pub async fn sbg_dma() {
-    loop {
-        let data = UART_CHANNEL.receive().await;
-    }
+    // loop {
+    //     let data = UART_CHANNEL.receive().await;
+    // }
 
     // cx.shared.sbg_manager.lock(|sbg| {
     //     match &mut sbg.xfer {

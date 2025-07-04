@@ -11,6 +11,7 @@ use chrono::NaiveDate;
 use defmt::*;
 use embassy_executor::Spawner;
 use embassy_stm32::gpio::{Level, Output, Speed};
+use embassy_stm32::mode::{Async, Blocking};
 use embassy_stm32::rtc::{Rtc, RtcConfig};
 use embassy_stm32::spi::{Config as SpiConfig, Spi};
 use embassy_stm32::time::mhz;
@@ -25,10 +26,10 @@ use heapless::Vec;
 use messages_prost::sensor::sbg::SbgData;
 use sbg_rs::sbg::SBG_BUFFER_SIZE;
 use static_cell::StaticCell;
-use {defmt_rtt as _, panic_probe as _};
+use {panic_probe as _};
 
 // Use a modern ms5611 driver that supports embedded-hal v1.0
-use common_arm::drivers::ms5611::{Ms5611, Oversampling};
+use common_arm::drivers::ms5611::{Ms5611, OversamplingRatio};
 
 // Use the asynchronous SpiDevice from embassy-embedded-hal
 use embassy_embedded_hal::shared_bus::asynch::spi::SpiDevice;
@@ -40,12 +41,10 @@ use smlang::statemachine;
 // =================================================================================
 
 type DmaBuffer = [u8; SBG_BUFFER_SIZE];
-type UartMessage = Vec<u8, SBG_BUFFER_SIZE>;
 
 #[global_allocator]
 static HEAP: Heap = Heap::empty();
 
-static UART_CHANNEL: Channel<CriticalSectionRawMutex, UartMessage, 4> = Channel::new();
 static SBG_CHANNEL: Channel<CriticalSectionRawMutex, SbgData, 10> = Channel::new();
 static BUFFER_CHANNEL: Channel<CriticalSectionRawMutex, DmaBuffer, 2> = Channel::new();
 
@@ -87,6 +86,7 @@ async fn led_blinker_task(pin: peripherals::PB14) {
 
 #[embassy_executor::task]
 async fn uart_dma_reader_task(mut rx: RingBufferedUartRx<'static>) {
+    info!("DMA reader task spawned.");
     loop {
         let mut buf: [u8; SBG_BUFFER_SIZE] = [0; SBG_BUFFER_SIZE];
         if let Ok(len) = rx.read(&mut buf).await {
@@ -106,16 +106,11 @@ async fn sbg_parser_task(tx: UartTx<'static, mode::Async>) {
     }
 }
 
-type BaroSpiDevice<'a> = SpiDevice<'a,
-    CriticalSectionRawMutex,
-    Spi<'a, mode::Async>,
-    Output<'a>>;
-
-#[embassy_executor::task]
-async fn baro_reader_task(mut baro: Ms5611<BaroSpiDevice<'static>, Delay>) {
+#[embassy_executor::task] 
+async fn baro_reader_task(mut baro: Ms5611<Spi<'static, Blocking>, Output<'static>, Delay>) {
     info!("Barometer reader task started.");
     loop {
-        match baro.get_pressure_and_temperature(Oversampling::Osr512).await {
+        match baro.read_pressure_temperature(OversamplingRatio::Osr512) {
             Ok(reading) => {
                 info!(
                     "Baro: Temp: {} C, Pressure: {} mbar",
@@ -145,52 +140,67 @@ async fn main(spawner: Spawner) {
     }
 
     let mut config = embassy_stm32::Config::default();
-    config.rcc.ls = rcc::LsConfig::default_lse();
+
+    // setup DMA clocks
+
+    // config.rcc.ls = rcc::LsConfig::default_lse();
     let p = embassy_stm32::init(config);
 
-    // --- RTC Setup ---
-    let now = NaiveDate::from_ymd_opt(2025, 6, 29)
-        .unwrap()
-        .and_hms_opt(15, 30, 0)
-        .unwrap();
-    let mut rtc = Rtc::new(p.RTC, RtcConfig::default());
-    rtc.set_datetime(now.into()).expect("Failed to set RTC time");
+    // --- SD Card Setup ---
 
-    RTC.lock(|cell| {
-        *cell.borrow_mut() = Some(rtc);
-    });
+    // --- GPS Setup --- 
+    // let gps_uart_config = UartConfig::default();
+    // let gps_uart = Uart::new(
+    //     p.UART7, p.PF6, p.PF7, Irqs, p.DMA1_CH1, p.DMA1_CH0, gps_uart_config,
+    // ).unwrap();
+    // let (tx, rx) = gps_uart.split();
+    // static mut RX_BUF: [u8; SBG_BUFFER_SIZE] = [0; SBG_BUFFER_SIZE];
+    // let ring_rx = rx.into_ring_buffered(unsafe { &mut RX_BUF });
 
-    // --- UART Setup ---
+    // // --- RTC Setup ---
+    // let now = NaiveDate::from_ymd_opt(2025, 6, 29)
+    //     .unwrap()
+    //     .and_hms_opt(15, 30, 0)
+    //     .unwrap();
+    // let mut rtc = Rtc::new(p.RTC, RtcConfig::default());
+    // rtc.set_datetime(now.into()).expect("Failed to set RTC time");
+
+    // RTC.lock(|cell| {
+    //     *cell.borrow_mut() = Some(rtc);
+    // });
+
+    // --- SBG Setup ---
     let uart_config = UartConfig::default();
     let usart = Uart::new(
         p.UART7, p.PF6, p.PF7, Irqs, p.DMA1_CH1, p.DMA1_CH0, uart_config,
     ).unwrap();
     let (tx, rx) = usart.split();
-    static mut RX_BUF: [u8; SBG_BUFFER_SIZE] = [0; SBG_BUFFER_SIZE];
-    let ring_rx = rx.into_ring_buffered(unsafe { &mut RX_BUF });
+    static mut RX_SBG_BUF: [u8; SBG_BUFFER_SIZE] = [0; SBG_BUFFER_SIZE];
+    let ring_rx = rx.into_ring_buffered(unsafe { &mut RX_SBG_BUF });
+    let mut sbg_pwr = Output::new(p.PD8, Level::High, Speed::VeryHigh);
 
-    // --- SPI Setup ---
+    // --- Baro SPI Setup ---
     let mut spi_config = SpiConfig::default();
-    spi_config.frequency = mhz(1);
+    spi_config.frequency = mhz(16);
     spi_config.mode = embassy_stm32::spi::Mode {
         polarity: embassy_stm32::spi::Polarity::IdleLow,
         phase: embassy_stm32::spi::Phase::CaptureOnFirstTransition,
     };
 
-    let spi_bus = Spi::new(
-        p.SPI4, p.PE2, p.PE6, p.PE5, p.DMA2_CH4, p.DMA2_CH1, spi_config,
+    let spi_bus = Spi::new_blocking(
+        p.SPI4, p.PE2, p.PE6, p.PE5, spi_config,
     );
     info!("SPI4 bus configured.");
 
     // Initialize the Mutex without the RefCell.
-    let spi_bus_mutex = SPI_BUS.init(embassy_sync::mutex::Mutex::new(spi_bus));
+    // let spi_bus_mutex = SPI_BUS.init(embassy_sync::mutex::Mutex::new(spi_bus));
 
-    let baro_cs = Output::new(p.PE4, Level::High, Speed::VeryHigh);
+    let baro_cs = Output::new(p.PB8, Level::High, Speed::VeryHigh);
     info!("Barometer CS pin configured.");
 
     // SpiDevice::new takes an immutable reference, which spi_bus_mutex can be coerced into.
-    let baro_spi_device = SpiDevice::new(spi_bus_mutex, baro_cs);
-    let baro = Ms5611::new(baro_spi_device, Delay).await.unwrap();
+    // let baro_spi_device = SpiDevice::new(spi_bus_mutex, baro_cs);
+    let baro = Ms5611::new(spi_bus, baro_cs, Delay).unwrap();
 
     let state_machine = StateMachine::new(traits::Context {});
 
@@ -200,24 +210,24 @@ async fn main(spawner: Spawner) {
     spawner.must_spawn(sbg_parser_task(tx));
     spawner.must_spawn(baro_reader_task(baro));
 
-    loop {
-        // state machine loop
-        match state_machine.state {
-            States::Ascent => {
+    // loop {
+    //     // state machine loop
+    //     match state_machine.state {
+    //         States::Ascent => {
 
-            },
-            States::Fault => {
+    //         },
+    //         States::Fault => {
 
-            },
-            States::Idle => {
+    //         },
+    //         States::Idle => {
 
-            },
-            States::Init => {
+    //         },
+    //         States::Init => {
                 
-            },
-            States::WaitForLaunch => {
+    //         },
+    //         States::WaitForLaunch => {
                 
-            },
-        } 
-    }
+    //         },
+    //     } 
+    // }
 }
