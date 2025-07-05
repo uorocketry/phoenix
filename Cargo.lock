@@ -755,6 +755,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "embedded-sdmmc"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ce3c7f9ea039eeafc4a49597b7bd5ae3a1c8e51b2803a381cb0f29ce90fe1ec6"
+dependencies = [
+ "byteorder",
+ "embedded-hal 1.0.0",
+ "embedded-io",
+ "heapless 0.8.0",
+ "log",
+]
+
+[[package]]
 name = "embedded-storage"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1163,7 +1176,7 @@ dependencies = [
  "prost",
  "prost-build",
  "serde",
- "ublox",
+ "ublox 0.4.5 (git+https://github.com/uorocketry/ublox)",
 ]
 
 [[package]]
@@ -1283,8 +1296,10 @@ dependencies = [
  "embedded-alloc",
  "embedded-hal 1.0.0",
  "embedded-hal-async",
+ "embedded-hal-bus",
  "embedded-io-async",
  "embedded-nal-async",
+ "embedded-sdmmc",
  "embedded-storage",
  "fdcan",
  "grounded",
@@ -1294,13 +1309,11 @@ dependencies = [
  "micromath",
  "panic-probe",
  "postcard",
- "rtic",
- "rtic-monotonics",
- "rtic-sync",
  "sbg-rs",
  "smlang",
  "static_cell",
  "stm32-fmc",
+ "ublox 0.4.5 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -2038,6 +2051,19 @@ checksum = "1dccffe3ce07af9386bfd29e80c0ab1a8205a2fc34e4bcd40364df902cfa8f3f"
 [[package]]
 name = "ublox"
 version = "0.4.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0ad0c3df1bc466bd97f94ab437aab9116d5c15909c8a5cb9905ee3c11df998e8"
+dependencies = [
+ "bitflags 2.9.1",
+ "chrono 0.4.41",
+ "num-traits",
+ "serde",
+ "ublox_derive 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
+name = "ublox"
+version = "0.4.5"
 source = "git+https://github.com/uorocketry/ublox#286d43a3ae9a3ba30a04be04c65bf89aca6b1bfe"
 dependencies = [
  "bitflags 2.9.1",
@@ -2045,7 +2071,18 @@ dependencies = [
  "defmt 0.3.100",
  "num-traits",
  "serde",
- "ublox_derive",
+ "ublox_derive 0.1.0 (git+https://github.com/uorocketry/ublox)",
+]
+
+[[package]]
+name = "ublox_derive"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dea60f23c86d2329b7162f6ebb82854bc77b992a9984e1fdfe8707f88e0e3e69"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
 ]
 
 [[package]]

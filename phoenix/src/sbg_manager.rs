@@ -24,7 +24,6 @@ use super::HEAP;
 // };
 // use stm32h7xx_hal::pac::UART4;
 // use stm32h7xx_hal::serial::{Rx, Tx};
-use rtic::Mutex;
 
 pub struct SBGManager {
     pub sbg_device: SBG,
