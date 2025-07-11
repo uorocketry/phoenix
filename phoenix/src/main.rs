@@ -4,38 +4,40 @@
 
 mod madgwick_service;
 mod sbg_manager;
-mod traits; 
+mod traits;
+mod music; 
 
 use core::cell::RefCell;
 use core::marker::PhantomData;
-use chrono::NaiveDate;
 use defmt::*;
 use embassy_executor::Spawner;
-use embassy_stm32::gpio::{Level, Output, Speed};
-use embassy_stm32::mode::{Async, Blocking};
-use embassy_stm32::rtc::{Rtc, RtcConfig};
+use embassy_stm32::adc::Adc;
+use embassy_stm32::gpio::{Input, Level, Output, OutputType, Pull, Speed};
+use embassy_stm32::mode::Blocking;
+use embassy_stm32::rtc::Rtc;
 use embassy_stm32::spi::{BitOrder, Config as SpiConfig, Spi};
-use embassy_stm32::time::mhz;
+use embassy_stm32::time::{khz, mhz};
+use embassy_stm32::timer::simple_pwm::{PwmPin, SimplePwm};
 use embassy_stm32::usart::{Config as UartConfig, RingBufferedUartRx, Uart, UartTx};
-use embassy_stm32::{bind_interrupts, mode, peripherals, rcc, usart};
+use embassy_stm32::{bind_interrupts, mode, peripherals, usart};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::blocking_mutex::Mutex;
 use embassy_sync::channel::Channel;
 use embassy_time::{Duration, Timer, Delay};
 use embedded_alloc::Heap;
-use heapless::Vec;
 use messages_prost::sensor::sbg::SbgData;
 use sbg_rs::sbg::SBG_BUFFER_SIZE;
 use static_cell::StaticCell;
 use ublox::{CfgPrtUartBuilder, DataBits, InProtoMask, OutProtoMask, Parity, StopBits, UartMode, UartPortId, UbxPacketRequest};
+use crate::traits::Context;
+use {defmt_rtt as _};
 use {panic_probe as _};
-use embedded_sdmmc::{Mode, SdCard, SdCardError, TimeSource, VolumeIdx, VolumeManager};
+use embedded_sdmmc::{Mode, SdCard, VolumeIdx, VolumeManager};
 use embedded_hal_bus::spi::RefCellDevice;
 // Use a modern ms5611 driver that supports embedded-hal v1.0
 use common_arm::drivers::ms5611::{Ms5611, OversamplingRatio};
 
 // Use the asynchronous SpiDevice from embassy-embedded-hal
-use embassy_embedded_hal::shared_bus::blocking::spi::SpiDevice;
 
 use smlang::statemachine;
 
@@ -52,6 +54,9 @@ static HEAP: Heap = Heap::empty();
 
 static SBG_CHANNEL: Channel<CriticalSectionRawMutex, SbgData, 10> = Channel::new();
 static BUFFER_CHANNEL: Channel<CriticalSectionRawMutex, DmaBuffer, 2> = Channel::new();
+// static FAULT_CHANNEL: Channel<CriticalSectionRawMutex, , 2> = Channel::new();
+
+static mut RX_SBG_BUF: [u8; SBG_BUFFER_SIZE] = [0; SBG_BUFFER_SIZE];
 
 // The SPI bus is protected by a Mutex, so the RefCell is not needed.
 static SPI_BUS: StaticCell<embassy_sync::mutex::Mutex<CriticalSectionRawMutex, Spi<mode::Async>>> = StaticCell::new();
@@ -67,9 +72,14 @@ bind_interrupts!(struct Irqs {
 
 statemachine! {
     transitions: {
-        *Init + Start = Idle,
+        *Init + Start = WaitForLaunch,
         WaitForLaunch + Launch = Ascent,
-        Fault + FaultCleared = Init,
+        Ascent + Apogee = Descent,
+        Descent + MainDeployment = Fuck, 
+        Descent + DrogueDeployment = DrogueDescent, 
+        DrogueDescent + MainDeployment =  MainDescent,
+        MainDescent + NoMovement = Landed,
+        Fault + FaultCleared = _,
         _ + FaultDetected = Fault,
     }
 }
@@ -143,7 +153,7 @@ async fn uart_gps_dma_reader_task(mut gps_rx: usart::UartRx<'static,mode::Blocki
                 gps_tx.blocking_write(&request).unwrap();
                 cortex_m::asm::delay(10_000);
                 let mut buf: [u8; 256] = [0; 256];
-                let mut bytes: [u8; 256] = [0; 256];
+                let bytes: [u8; 256] = [0; 256];
                 let buf = ublox::FixedLinearBuffer::new(&mut buf[..]);
                 let mut parser = ublox::Parser::new(buf);
                 let mut msgs = parser.consume(&buf_data);
@@ -224,6 +234,43 @@ async fn baro_reader_task(mut baro: Ms5611<Spi<'static, Blocking>, Output<'stati
     }
 }
 
+#[embassy_executor::task] 
+async fn sm_task(spawner: Spawner, state_machine: StateMachine<Context>) {
+    info!("State Machine task started.");
+    loop {
+        match state_machine.state {
+            States::Ascent => {
+
+            },
+            States::Fault => {
+
+            },
+            States::Init => {
+                
+            },
+            States::WaitForLaunch => {
+                
+            },
+            States::Descent => {
+
+            },
+            States::DrogueDescent => {
+
+            },
+            States::Fuck => {
+
+            },
+            States::Landed => {
+
+            },
+            States::MainDescent => {
+
+            }
+        } 
+        Timer::after(Duration::from_millis(1000)).await;
+    }
+}
+
 // =================================================================================
 // Main Entry Point
 // =================================================================================
@@ -294,9 +341,8 @@ async fn main(spawner: Spawner) {
         p.UART7, p.PF6, p.PF7, Irqs, p.DMA1_CH1, p.DMA1_CH0, uart_config,
     ).unwrap();
     let (tx, rx) = usart.split();
-    static mut RX_SBG_BUF: [u8; SBG_BUFFER_SIZE] = [0; SBG_BUFFER_SIZE];
     let ring_rx = rx.into_ring_buffered(unsafe { &mut RX_SBG_BUF });
-    let mut sbg_pwr = Output::new(p.PD8, Level::High, Speed::Low);
+    let sbg_pwr = Output::new(p.PD8, Level::High, Speed::Low);
 
     // --- Baro SPI Setup ---
     let mut spi_config = SpiConfig::default();
@@ -348,7 +394,7 @@ async fn main(spawner: Spawner) {
     let volume_mgr = VolumeManager::new(sdcard, TimeSink::new());
     let volume0 = volume_mgr.open_volume(VolumeIdx(0)).unwrap();
     let root_dir = volume0.open_root_dir().unwrap();
-    let mut my_file = root_dir.open_file_in_dir("MY_FILE.TXT", Mode::ReadOnly).unwrap();
+    let my_file = root_dir.open_file_in_dir("MY_FILE.TXT", Mode::ReadOnly).unwrap();
     while !my_file.is_eof() {
         let mut buffer = [0u8; 32];
         let num_read = my_file.read(&mut buffer).unwrap();
@@ -367,7 +413,7 @@ async fn main(spawner: Spawner) {
         p.UART8,  p.PE0, p.PE1, uart_gps_config
     ).unwrap();
 
-    let (mut gps_tx, mut gps_rx) = uart_gps.split();
+    let (mut gps_tx, gps_rx) = uart_gps.split();
     // static mut RX_GPS_BUF: [u8; GPS_BUFFER_SIZE] = [0; GPS_BUFFER_SIZE];
     // let ring_gps_rx = gps_rx.into_ring_buffered(unsafe { &mut RX_GPS_BUF });
 
@@ -392,37 +438,67 @@ async fn main(spawner: Spawner) {
 
     gps_tx.blocking_write(&packet).unwrap();
 
+    // --- Boom Boom Setup --- 
+    /*
+        MAIN_ARM/TEST = PD6
+        MAIN_FIRE = PD5
+        MAIN_ARM/TEST_B = PD14
+        MAIN_FIRE_B = PD13
+        DROGUE_ARM/TEST = PC11
+        DROGUE_FIRE = PC12
+        DROGUE_ARM/TEST_B = PD2
+        DROGUE_FIRE_B = PD1
+        MAIN_MCU_EMATCH_SENSE = PA2
+        MAIN_MCU_EMATCH_SENSE_B = PB0
+        DROUGE_MCU_EMATCH_SENSE = PA3
+        DROGUE_MCU_EMATCH_SENSE_B = PC5
+     */
+
+    let main_arm_test = Input::new(p.PD6, Pull::Down);
+    let main_arm_test_b = Input::new(p.PD14, Pull::Down); 
+    let drogue_arm_test = Input::new(p.PC11, Pull::Down);
+    let drogue_arm_test_b = Input::new(p.PD2, Pull::Down);
+
+    let main_fire = Output::new(p.PD5, Level::Low, Speed::Low);
+    let main_fire_b = Output::new(p.PD13, Level::Low, Speed::Low);
+    let drogue_fire = Output::new(p.PC12, Level::Low, Speed::Low);
+    let drogue_fire_b = Output::new(p.PD1, Level::Low, Speed::Low);
+
+    let mut main_mcu_ematch_sense = p.PA2; 
+    let mut main_mcu_ematch_sense_b = p.PB0; 
+
+    let mut drogue_mcu_ematch_sense = p.PA3; 
+    let mut drogue_mcu_ematch_sense_b = p.PC5; 
+
+    let mut adc = Adc::new(p.ADC1);
+    info!("ADC measurement main ematch {}", adc.blocking_read(&mut main_mcu_ematch_sense));
+    info!("ADC measurement main B ematch {}", adc.blocking_read(&mut main_mcu_ematch_sense_b));
+    info!("ADC measurement drogue ematch {}", adc.blocking_read(&mut drogue_mcu_ematch_sense));
+    info!("ADC measurement drogue B ematch {}", adc.blocking_read(&mut drogue_mcu_ematch_sense_b));
+    
+    // --- Buzzer 🐝 ---
+    let buzz_out_pin = PwmPin::new_ch1(p.PC6, OutputType::PushPull);
+    let mut pwm = SimplePwm::new(p.TIM3, Some(buzz_out_pin), None, None, None, khz(4), Default::default());
+    let mut ch1 = pwm.ch1();
+    ch1.set_duty_cycle_fraction(ch1.max_duty_cycle(), 4); 
+    ch1.enable();   
+
+    music::play_song(&mut pwm, music::MARIO_MELODY, 100);
 
     // --- State Machine ---
     let state_machine = StateMachine::new(traits::Context {});
 
 
+    // NOTE 
+    // Creating multiple executor instances is supported, to run tasks with multiple priority levels. This allows higher-priority tasks to preempt lower-priority tasks.
 
     // --- Spawning Tasks ---
     spawner.must_spawn(led_blinker_task(p.PB14));
     spawner.must_spawn(uart_dma_reader_task(ring_rx));
     spawner.must_spawn(uart_gps_dma_reader_task(gps_rx, gps_tx));
     spawner.must_spawn(sbg_parser_task(tx));
-    // spawner.must_spawn(baro_reader_task(baro));
+    spawner.must_spawn(baro_reader_task(baro));
 
-    // loop {
-    //     // state machine loop
-    //     match state_machine.state {
-    //         States::Ascent => {
-
-    //         },
-    //         States::Fault => {
-
-    //         },
-    //         States::Idle => {
-
-    //         },
-    //         States::Init => {
-                
-    //         },
-    //         States::WaitForLaunch => {
-                
-    //         },
-    //     } 
-    // }
+    // pass control of the spawner to the state machine
+    spawner.must_spawn(sm_task(spawner, state_machine));
 }
