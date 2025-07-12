@@ -7,6 +7,7 @@ mod sbg_manager;
 mod traits;
 mod music; 
 
+use libm::powf;
 use core::cell::RefCell;
 use core::marker::PhantomData;
 use defmt::*;
@@ -19,12 +20,13 @@ use embassy_stm32::spi::{BitOrder, Config as SpiConfig, Spi};
 use embassy_stm32::time::{khz, mhz};
 use embassy_stm32::timer::simple_pwm::{PwmPin, SimplePwm};
 use embassy_stm32::usart::{Config as UartConfig, RingBufferedUartRx, Uart, UartTx};
-use embassy_stm32::{bind_interrupts, mode, peripherals, usart};
+use embassy_stm32::{bind_interrupts, mode, peripherals, rcc, usart};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::blocking_mutex::Mutex;
 use embassy_sync::channel::Channel;
-use embassy_time::{Duration, Timer, Delay};
+use embassy_time::{Delay, Duration, Instant, Timer};
 use embedded_alloc::Heap;
+use heapless::HistoryBuffer;
 use messages_prost::sensor::sbg::SbgData;
 use sbg_rs::sbg::SBG_BUFFER_SIZE;
 use static_cell::StaticCell;
@@ -218,6 +220,17 @@ async fn sbg_parser_task(tx: UartTx<'static, mode::Async>) {
 #[embassy_executor::task] 
 async fn baro_reader_task(mut baro: Ms5611<Spi<'static, Blocking>, Output<'static>, Delay>) {
     info!("Barometer reader task started.");
+    const MAIN_HEIGHT: f32 = GROUND_HEIGHT + 500.0; // meters ASL
+    const HEIGHT_MIN: f32 = GROUND_HEIGHT + 300.0; // meters ASL
+    const GROUND_HEIGHT: f32 = 300.0; // meters ASL
+    const TICK_RATE: f32 = 0.002; // seconds 
+    const ASCENT_LOCKOUT: f32 = 100.0; 
+    const DATA_POINTS: usize = 8;
+    const VALID_DESCENT_RATE: f32 = -1.0; // meters per second
+
+    let mut historical_barometer_altitude: HistoryBuffer<f32, 8> = HistoryBuffer::new();
+
+    let mut last_reading_time = Instant::now();
     loop {
         match baro.read_pressure_temperature(OversamplingRatio::Osr512) {
             Ok(reading) => {
@@ -225,6 +238,47 @@ async fn baro_reader_task(mut baro: Ms5611<Spi<'static, Blocking>, Output<'stati
                     "Baro: Temp: {} C, Pressure: {} mbar",
                     reading.0, reading.1
                 );
+                // Hypsometric Formula 
+                // replace reading.0 with better temperature source
+                let altitude = ((powf(1013.25 / reading.1, 1.0/5.257) - 1.0) * (reading.0 + 237.15)) / 0.0065;  
+                historical_barometer_altitude.write(altitude);
+                {
+                    if historical_barometer_altitude.len() < 8 {
+                        info!("not enough data points");
+                        continue;
+                    }
+                    let mut buf = historical_barometer_altitude.oldest_ordered();
+                    match buf.next() {
+                        Some(last) => {
+                            let mut avg_sum: f32 = 0.0;
+                            let mut prev = last;
+                            for i in buf {
+                                // readings should never exceed a gap of max u64 so conversion is acceptable and won't wrap. 
+                                let time_diff: f32 = Instant::now().duration_since(last_reading_time).as_secs() as f32;
+                                info!("prev alt: {:?}, new alt: {}, time diff {}", prev, i, time_diff);
+                
+                                if time_diff == 0.0 {
+                                    continue;
+                                }
+                                let slope = (i - prev) / time_diff;
+                                if slope > ASCENT_LOCKOUT {
+                                    continue;
+                                }
+                                avg_sum += slope;
+                                prev = i;
+                
+                                // Check if the average descent rate is valid
+                                if avg_sum / (DATA_POINTS as f32 - 1.0) <= VALID_DESCENT_RATE {
+                                    info!("Apogee: avg_sum: {}", avg_sum / (DATA_POINTS as f32 - 1.0));
+                                    // todo!("Send Apog ovee eventer events channel to state machine to process.");
+                                }
+                            }
+                        }
+                        None => {
+                            continue;
+                        }
+                    }
+                }
             }
             Err(e) => {
                 // error!("Baro: Driver reading failed: {:?}", e);
@@ -237,6 +291,7 @@ async fn baro_reader_task(mut baro: Ms5611<Spi<'static, Blocking>, Output<'stati
 #[embassy_executor::task] 
 async fn sm_task(spawner: Spawner, state_machine: StateMachine<Context>) {
     info!("State Machine task started.");
+
     loop {
         match state_machine.state {
             States::Ascent => {
@@ -320,18 +375,6 @@ async fn main(spawner: Spawner) {
     // let (tx, rx) = gps_uart.split();
     // static mut RX_BUF: [u8; SBG_BUFFER_SIZE] = [0; SBG_BUFFER_SIZE];
     // let ring_rx = rx.into_ring_buffered(unsafe { &mut RX_BUF });
-
-    // // --- RTC Setup ---
-    // let now = NaiveDate::from_ymd_opt(2025, 6, 29)
-    //     .unwrap()
-    //     .and_hms_opt(15, 30, 0)
-    //     .unwrap();
-    // let mut rtc = Rtc::new(p.RTC, RtcConfig::default());
-    // rtc.set_datetime(now.into()).expect("Failed to set RTC time");
-
-    // RTC.lock(|cell| {
-    //     *cell.borrow_mut() = Some(rtc);
-    // });
 
     // --- SBG Setup ---
     let mut uart_config = UartConfig::default();
@@ -483,7 +526,7 @@ async fn main(spawner: Spawner) {
     ch1.set_duty_cycle_fraction(ch1.max_duty_cycle(), 4); 
     ch1.enable();   
 
-    music::play_song(&mut pwm, music::MARIO_MELODY, 100);
+    music::play_song(&mut pwm, music::MARIO_MELODY, 100).await;
 
     // --- State Machine ---
     let state_machine = StateMachine::new(traits::Context {});

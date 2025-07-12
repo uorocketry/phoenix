@@ -23,6 +23,7 @@ chrono = { workspace = true }
 messages-prost = { workspace = true }
 madgwick = { workspace = true }
 sbg-rs = { path = "../crates/sbg-rs" }
+libm = "0.2.15"
 # Change stm32h743bi to your chip name, if necessary.
 embassy-stm32 = { version = "0.2.0", features = ["defmt", "stm32h743bi", "time-driver-tim2", "exti", "memory-x", "unstable-pac", "chrono"] }
 embassy-sync = { version = "0.6.2", features = ["defmt"] }
