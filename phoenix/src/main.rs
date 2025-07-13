@@ -68,7 +68,7 @@ pub static RTC: Mutex<CriticalSectionRawMutex, RefCell<Option<Rtc>>> =
     Mutex::new(RefCell::new(None));
 
 bind_interrupts!(struct Irqs {
-    UART7 => usart::InterruptHandler<peripherals::UART7>;
+    UART4 => usart::InterruptHandler<peripherals::UART4>;
     UART8 => usart::InterruptHandler<peripherals::UART8>;
 });
 
@@ -381,7 +381,7 @@ async fn main(spawner: Spawner) {
     uart_config.baudrate = 115200; 
     
     let usart = Uart::new(
-        p.UART7, p.PF6, p.PF7, Irqs, p.DMA1_CH1, p.DMA1_CH0, uart_config,
+        p.UART4, p.PA1, p.PA0, Irqs, p.DMA1_CH1, p.DMA1_CH0, uart_config,
     ).unwrap();
     let (tx, rx) = usart.split();
     let ring_rx = rx.into_ring_buffered(unsafe { &mut RX_SBG_BUF });
