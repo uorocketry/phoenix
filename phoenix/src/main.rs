@@ -141,18 +141,19 @@ async fn uart_dma_reader_task(mut rx: RingBufferedUartRx<'static>) {
 }
 
 #[embassy_executor::task]
-async fn uart_gps_dma_reader_task(mut gps_rx: usart::UartRx<'static,mode::Blocking> , mut gps_tx: UartTx<'static, mode::Blocking>) {
+async fn uart_gps_dma_reader_task(mut gps_rx: RingBufferedUartRx<'static> , mut gps_tx: UartTx<'static, mode::Async>) {
     info!("DMA reader task spawned.");
     loop {
         let mut buf_data: [u8; GPS_BUFFER_SIZE] = [0; GPS_BUFFER_SIZE];
-        if let Ok(len) = gps_rx.blocking_read(&mut buf_data) {
+        // if let Ok(len) = gps_rx.blocking_read(&mut buf_data) {
+        if let Ok(len) = gps_rx.read(&mut buf_data).await {
                 info!("read");
             // if len > 0 {
                 // let _ = BUFFER_CHANNEL.try_send(buf);
 
                 let request =
                     UbxPacketRequest::request_for::<ublox::NavPosLlh>().into_packet_bytes();
-                gps_tx.blocking_write(&request).unwrap();
+                gps_tx.write(&request).await.unwrap();
                 cortex_m::asm::delay(10_000);
                 let mut buf: [u8; 256] = [0; 256];
                 let bytes: [u8; 256] = [0; 256];
@@ -452,13 +453,17 @@ async fn main(spawner: Spawner) {
     let mut gps_reset = Output::new(p.PB2, Level::Low, Speed::Low); 
     let mut uart_gps_config = UartConfig::default();
     uart_gps_config.baudrate = 9600; 
-    let uart_gps = Uart::new_blocking(
-        p.UART8,  p.PE0, p.PE1, uart_gps_config
+    // let uart_gps = Uart::new_blocking(
+    //     p.UART8,  p.PE0, p.PE1, uart_gps_config
+    // ).unwrap();
+
+    let uart_gps = Uart::new(
+        p.UART8, p.PE0, p.PE1, Irqs, p.DMA1_CH2, p.DMA1_CH3, uart_config
     ).unwrap();
 
     let (mut gps_tx, gps_rx) = uart_gps.split();
-    // static mut RX_GPS_BUF: [u8; GPS_BUFFER_SIZE] = [0; GPS_BUFFER_SIZE];
-    // let ring_gps_rx = gps_rx.into_ring_buffered(unsafe { &mut RX_GPS_BUF });
+    static mut RX_GPS_BUF: [u8; GPS_BUFFER_SIZE] = [0; GPS_BUFFER_SIZE];
+    let ring_gps_rx = gps_rx.into_ring_buffered(unsafe { &mut RX_GPS_BUF });
 
     gps_reset.set_low();
     cortex_m::asm::delay(300_000);
@@ -538,7 +543,7 @@ async fn main(spawner: Spawner) {
     // --- Spawning Tasks ---
     spawner.must_spawn(led_blinker_task(p.PB14));
     spawner.must_spawn(uart_dma_reader_task(ring_rx));
-    spawner.must_spawn(uart_gps_dma_reader_task(gps_rx, gps_tx));
+    spawner.must_spawn(uart_gps_dma_reader_task(ring_gps_rx, gps_tx));
     spawner.must_spawn(sbg_parser_task(tx));
     spawner.must_spawn(baro_reader_task(baro));
 
