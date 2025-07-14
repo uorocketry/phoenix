@@ -5,12 +5,15 @@
 mod madgwick_service;
 mod sbg_manager;
 mod traits;
-mod music; 
+mod music;
+mod model;
 
 use libm::powf;
 use core::cell::RefCell;
 use core::marker::PhantomData;
 use defmt::*;
+use embedded_alloc::LlffHeap as Heap;
+use burn::{backend::NdArray, tensor::Tensor};
 use embassy_executor::Spawner;
 use embassy_stm32::adc::Adc;
 use embassy_stm32::gpio::{Input, Level, Output, OutputType, Pull, Speed};
@@ -25,7 +28,7 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::blocking_mutex::Mutex;
 use embassy_sync::channel::Channel;
 use embassy_time::{Delay, Duration, Instant, Timer};
-use embedded_alloc::Heap;
+// use embedded_alloc::Heap;
 use heapless::HistoryBuffer;
 use messages_prost::sensor::sbg::SbgData;
 use sbg_rs::sbg::SBG_BUFFER_SIZE;
@@ -42,10 +45,13 @@ use common_arm::drivers::ms5611::{Ms5611, OversamplingRatio};
 // Use the asynchronous SpiDevice from embassy-embedded-hal
 
 use smlang::statemachine;
-
+use crate::model::sine::Model;
 // =================================================================================
 // Shared Resources & Types
 // =================================================================================
+
+type Backend = NdArray<f32>;
+type BackendDevice = <Backend as burn::tensor::backend::Backend>::Device;
 
 type DmaBuffer = [u8; SBG_BUFFER_SIZE];
 
@@ -143,6 +149,9 @@ async fn uart_dma_reader_task(mut rx: RingBufferedUartRx<'static>) {
 #[embassy_executor::task]
 async fn uart_gps_dma_reader_task(mut gps_rx: RingBufferedUartRx<'static> , mut gps_tx: UartTx<'static, mode::Async>) {
     info!("DMA reader task spawned.");
+    let request =
+        UbxPacketRequest::request_for::<ublox::NavPosLlh>().into_packet_bytes();
+    gps_tx.write(&request).await.unwrap();
     loop {
         let mut buf_data: [u8; GPS_BUFFER_SIZE] = [0; GPS_BUFFER_SIZE];
         // if let Ok(len) = gps_rx.blocking_read(&mut buf_data) {
@@ -536,6 +545,14 @@ async fn main(spawner: Spawner) {
     // --- State Machine ---
     let state_machine = StateMachine::new(traits::Context {});
 
+    // --- AI ---
+    // Get a default device for the backend
+    let device = BackendDevice::default();
+
+    // Create a new model and load the state
+    let model: Model<Backend> = Model::default();
+
+    let output = run_model(&model, &device, 1.0);
 
     // NOTE 
     // Creating multiple executor instances is supported, to run tasks with multiple priority levels. This allows higher-priority tasks to preempt lower-priority tasks.
@@ -549,4 +566,14 @@ async fn main(spawner: Spawner) {
 
     // pass control of the spawner to the state machine
     spawner.must_spawn(sm_task(spawner, state_machine));
+}
+
+fn run_model<'a>(model: &Model<NdArray>, device: &BackendDevice, input: f32) -> Tensor<Backend, 2> {
+    // Define the tensor
+    let input = Tensor::<Backend, 2>::from_floats([[input]], &device);
+
+    // Run the model on the input
+    let output = model.forward(input);
+
+    output
 }
