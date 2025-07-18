@@ -301,6 +301,7 @@ impl SBG {
             if let Some(front) = DEQ.pop_front() {
                 readBytes += 1;
                 array[i] = front;
+                // info!("Read byte: {}", front);
             } else {
                 // info!("No item in dequeue");
                 break;

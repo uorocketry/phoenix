@@ -85,29 +85,29 @@ pub fn sbg_get_time() -> u32 {
 }
 
 /// Publishes data to the SBG channel.
-pub fn sbg_handle_data(data: CallbackData) {
+pub async fn sbg_handle_data(data: CallbackData) {
     match data {
         CallbackData::Air(x) => SBG_CHANNEL.send(messages_prost::sensor::sbg::SbgData {
             data: Some(messages_prost::sensor::sbg::sbg_data::Data::Air(x)),
-        }),
+        }).await,
         CallbackData::EkfNav(x) => SBG_CHANNEL.send(messages_prost::sensor::sbg::SbgData {
             data: Some(messages_prost::sensor::sbg::sbg_data::Data::EkfNav(x)),
-        }),
+        }).await,
         CallbackData::EkfQuat(x) => SBG_CHANNEL.send(messages_prost::sensor::sbg::SbgData {
             data: Some(messages_prost::sensor::sbg::sbg_data::Data::EkfQuat(x)),
-        }),
+        }).await,
         CallbackData::GpsPos(x) => SBG_CHANNEL.send(messages_prost::sensor::sbg::SbgData {
             data: Some(messages_prost::sensor::sbg::sbg_data::Data::GpsPos(x)),
-        }),
+        }).await,
         CallbackData::GpsVel(x) => SBG_CHANNEL.send(messages_prost::sensor::sbg::SbgData {
             data: Some(messages_prost::sensor::sbg::sbg_data::Data::GpsVel(x)),
-        }),
+        }).await,
         CallbackData::Imu(x) => SBG_CHANNEL.send(messages_prost::sensor::sbg::SbgData {
             data: Some(messages_prost::sensor::sbg::sbg_data::Data::Imu(x)),
-        }),
+        }).await,
         CallbackData::UtcTime(x) => SBG_CHANNEL.send(messages_prost::sensor::sbg::SbgData {
             data: Some(messages_prost::sensor::sbg::sbg_data::Data::UtcTime(x)),
-        }),
+        }).await,
     };
 }
 

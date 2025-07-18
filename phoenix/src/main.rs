@@ -8,7 +8,10 @@ mod traits;
 mod music;
 mod model;
 
+use embedded_hal_1::delay::DelayNs;
+use embedded_hal_1::digital::{OutputPin, PinState};
 use libm::powf;
+use messages_prost::sensor::gps;
 use core::cell::RefCell;
 use core::marker::PhantomData;
 use defmt::*;
@@ -17,12 +20,12 @@ use burn::{backend::NdArray, tensor::Tensor};
 use embassy_executor::Spawner;
 use embassy_stm32::adc::Adc;
 use embassy_stm32::gpio::{Input, Level, Output, OutputType, Pull, Speed};
-use embassy_stm32::mode::Blocking;
+use embassy_stm32::mode::{Async, Blocking};
 use embassy_stm32::rtc::Rtc;
 use embassy_stm32::spi::{BitOrder, Config as SpiConfig, Spi};
 use embassy_stm32::time::{khz, mhz};
 use embassy_stm32::timer::simple_pwm::{PwmPin, SimplePwm};
-use embassy_stm32::usart::{Config as UartConfig, RingBufferedUartRx, Uart, UartTx};
+use embassy_stm32::usart::{Config as UartConfig, RingBufferedUartRx, Uart, UartRx, UartTx};
 use embassy_stm32::{bind_interrupts, mode, peripherals, rcc, usart};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::blocking_mutex::Mutex;
@@ -57,15 +60,19 @@ type DmaBuffer = [u8; SBG_BUFFER_SIZE];
 
 const GPS_BUFFER_SIZE: usize = 256;
 
+
 #[global_allocator]
 static HEAP: Heap = Heap::empty();
 
 static SBG_CHANNEL: Channel<CriticalSectionRawMutex, SbgData, 10> = Channel::new();
-static BUFFER_CHANNEL: Channel<CriticalSectionRawMutex, DmaBuffer, 2> = Channel::new();
+static BUFFER_CHANNEL: Channel<CriticalSectionRawMutex, DmaBuffer, 10> = Channel::new();
 // static FAULT_CHANNEL: Channel<CriticalSectionRawMutex, , 2> = Channel::new();
 
+#[link_section = ".axisram.buffers"]
 static mut RX_SBG_BUF: [u8; SBG_BUFFER_SIZE] = [0; SBG_BUFFER_SIZE];
 
+#[link_section = ".axisram.buffers"]
+static mut RX_GPS_BUF: [u8; GPS_BUFFER_SIZE] = [0; GPS_BUFFER_SIZE];
 // The SPI bus is protected by a Mutex, so the RefCell is not needed.
 static SPI_BUS: StaticCell<embassy_sync::mutex::Mutex<CriticalSectionRawMutex, Spi<mode::Async>>> = StaticCell::new();
 
@@ -140,9 +147,10 @@ async fn uart_dma_reader_task(mut rx: RingBufferedUartRx<'static>) {
         let mut buf: [u8; SBG_BUFFER_SIZE] = [0; SBG_BUFFER_SIZE];
         if let Ok(len) = rx.read(&mut buf).await {
             if len > 0 {
-                let _ = BUFFER_CHANNEL.try_send(buf);
+                let _ = BUFFER_CHANNEL.send(buf).await;
             }
         }
+        Delay.delay_ms(100);
     }
 }
 
@@ -151,18 +159,14 @@ async fn uart_gps_dma_reader_task(mut gps_rx: RingBufferedUartRx<'static> , mut 
     info!("DMA reader task spawned.");
     let request =
         UbxPacketRequest::request_for::<ublox::NavPosLlh>().into_packet_bytes();
-    gps_tx.write(&request).await.unwrap();
+    gps_tx.write(&request).await;
     loop {
         let mut buf_data: [u8; GPS_BUFFER_SIZE] = [0; GPS_BUFFER_SIZE];
-        // if let Ok(len) = gps_rx.blocking_read(&mut buf_data) {
         if let Ok(len) = gps_rx.read(&mut buf_data).await {
                 info!("read");
-            // if len > 0 {
-                // let _ = BUFFER_CHANNEL.try_send(buf);
-
                 let request =
                     UbxPacketRequest::request_for::<ublox::NavPosLlh>().into_packet_bytes();
-                gps_tx.write(&request).await.unwrap();
+                gps_tx.blocking_write(&request);
                 cortex_m::asm::delay(10_000);
                 let mut buf: [u8; 256] = [0; 256];
                 let bytes: [u8; 256] = [0; 256];
@@ -178,16 +182,6 @@ async fn uart_gps_dma_reader_task(mut gps_rx: RingBufferedUartRx<'static> , mut 
                                     x.lat_degrees(),
                                     x.lon_degrees()
                                 );
-                                // let message = Message::new(
-                                //     cortex_m::interrupt::free(|cs| {
-                                //         let mut rc = RTC.borrow(cs).borrow_mut();
-                                //         let rtc = rc.as_mut().unwrap();
-                                //         rtc.count32()
-                                //     }),
-                                //     COM_ID,
-                                //     messages::sensor::Sensor::new(message_data),
-                                // );
-                                // spawn!(send_internal, message).ok();
                             }
                             ublox::PacketRef::NavStatus(x) => {
                                 info!("GPS fix stat: {:?}", x.fix_stat_raw());
@@ -223,7 +217,45 @@ async fn sbg_parser_task(tx: UartTx<'static, mode::Async>) {
     let mut sbg = sbg_manager::SBGManager::new(tx);
     loop {
         let full_buffer = BUFFER_CHANNEL.receive().await;
+        // info!("Received SBG data: {:?}", full_buffer);
         sbg.sbg_device.read_data(&full_buffer.try_into().unwrap());
+    }
+}
+
+#[embassy_executor::task]
+async fn sbg_receiver_task() {
+    loop {
+        let data = SBG_CHANNEL.receive().await;
+        match data.data {
+            Some(x) => {
+                match x {
+                    messages_prost::sensor::sbg::sbg_data::Data::GpsPos(gps_pos) => {
+                        info!("Received SBG GPS Position: {:?}", gps_pos.time_stamp);
+                    },
+                    messages_prost::sensor::sbg::sbg_data::Data::UtcTime(utc_time) => {
+                        info!("Received SBG UTC Time: {:?}", utc_time.time_stamp);
+                    },
+                    messages_prost::sensor::sbg::sbg_data::Data::Imu(imu) => {
+                        info!("Received SBG IMU data: {:?}", imu.time_stamp);
+                    },
+                    messages_prost::sensor::sbg::sbg_data::Data::EkfQuat(ekf_quat) => {
+                        info!("Received SBG EKF Quaternion: {:?}", ekf_quat.time_stamp);
+                    },
+                    messages_prost::sensor::sbg::sbg_data::Data::EkfNav(ekf_nav) => {
+                        info!("Received SBG EKF Navigation: {:?}", ekf_nav.time_stamp);
+                    },
+                    messages_prost::sensor::sbg::sbg_data::Data::GpsVel(gps_vel) => {
+                        info!("Received SBG GPS Velocity: {:?}", gps_vel.time_stamp);
+                    },
+                    messages_prost::sensor::sbg::sbg_data::Data::Air(air) => {
+                        info!("Received SBG Air data: {:?}", air.time_stamp );
+                    },
+                }
+            },
+            None => {
+                info!("No SBG data received");
+            },
+        }
     }
 }
 
@@ -364,6 +396,22 @@ async fn main(spawner: Spawner) {
             divq: Some(PllDiv::DIV8), // used by SPI3. 100Mhz.
             divr: None,
         });
+        config.rcc.pll2 = Some(Pll {
+            source: PllSource::HSI,
+            prediv: PllPreDiv::DIV4,
+            mul: PllMul::MUL50,
+            divp: Some(PllDiv::DIV2),
+            divq: Some(PllDiv::DIV8), // used by SPI3. 100Mhz.
+            divr: None,
+        });
+        config.rcc.pll3 = Some(Pll {
+            source: PllSource::HSI,
+            prediv: PllPreDiv::DIV4,
+            mul: PllMul::MUL50,
+            divp: Some(PllDiv::DIV2),
+            divq: Some(PllDiv::DIV8), // used by SPI3. 100Mhz.
+            divr: None,
+        });
         config.rcc.sys = Sysclk::PLL1_P; // 400 Mhz
         config.rcc.ahb_pre = AHBPrescaler::DIV2; // 200 Mhz
         config.rcc.apb1_pre = APBPrescaler::DIV2; // 100 Mhz
@@ -375,8 +423,6 @@ async fn main(spawner: Spawner) {
     // config.rcc.ls = rcc::LsConfig::default_lse();
     let p = embassy_stm32::init(config);
     
-    // --- SD Card Setup ---
-
     // --- GPS Setup --- 
     // let gps_uart_config = UartConfig::default();
     // let gps_uart = Uart::new(
@@ -389,22 +435,18 @@ async fn main(spawner: Spawner) {
     // --- SBG Setup ---
     let mut uart_config = UartConfig::default();
     uart_config.baudrate = 115200; 
-    
     let usart = Uart::new(
         p.UART4, p.PA1, p.PA0, Irqs, p.DMA1_CH1, p.DMA1_CH0, uart_config,
     ).unwrap();
     let (tx, rx) = usart.split();
     let ring_rx = rx.into_ring_buffered(unsafe { &mut RX_SBG_BUF });
-    let sbg_pwr = Output::new(p.PD8, Level::High, Speed::Low);
-
+    let mut sbg_pwr = Output::new(p.PD8, Level::High, Speed::Low);
     // --- Baro SPI Setup ---
     let mut spi_config = SpiConfig::default();
     spi_config.frequency = mhz(16);
-    spi_config.mode = embassy_stm32::spi::Mode {
-        polarity: embassy_stm32::spi::Polarity::IdleLow,
-        phase: embassy_stm32::spi::Phase::CaptureOnFirstTransition,
-    };
-
+    // let spi_bus = Spi::new(
+    //     p.SPI4, p.PE2, p.PE6, p.PE5, p.DMA1_CH6, p.DMA1_CH7, spi_config,
+    // );
     let spi_bus = Spi::new_blocking(
         p.SPI4, p.PE2, p.PE6, p.PE5, spi_config,
     );
@@ -413,7 +455,7 @@ async fn main(spawner: Spawner) {
     // Initialize the Mutex without the RefCell.
     // let spi_bus_mutex = SPI_BUS.init(embassy_sync::mutex::Mutex::new(spi_bus));
 
-    let baro_cs = Output::new(p.PB8, Level::High, Speed::VeryHigh);
+    let baro_cs = Output::new(p.PB8, Level::High, Speed::Low);
     info!("Barometer CS pin configured.");
 
     // SpiDevice::new takes an immutable reference, which spi_bus_mutex can be coerced into.
@@ -422,63 +464,57 @@ async fn main(spawner: Spawner) {
 
 
     // --- SD Card ---
-    let mut sd_spi_config = SpiConfig::default();
+    // let mut sd_spi_config = SpiConfig::default();
 
-    sd_spi_config.frequency = mhz(16);
-    
-    sd_spi_config.mode = embassy_stm32::spi::Mode {
-        polarity: embassy_stm32::spi::Polarity::IdleLow,
-        phase: embassy_stm32::spi::Phase::CaptureOnFirstTransition,
-    };
+    // sd_spi_config.frequency = mhz(16);
+    // sd_spi_config.bit_order = BitOrder::MsbFirst;
 
-    sd_spi_config.bit_order = BitOrder::MsbFirst;
+    // let sd_spi_bus = Spi::new_blocking(
+    //     p.SPI1, p.PA5, p.PA7, p.PA6, sd_spi_config,
+    // );
 
-    let sd_spi_bus = Spi::new(
-        p.SPI1, p.PA5, p.PA7, p.PA6, p.DMA1_CH4, p.DMA1_CH5, sd_spi_config,
-    );
+    // let sd_cs = Output::new(p.PB9, Level::High, Speed::VeryHigh);
 
-    let sd_cs = Output::new(p.PB9, Level::High, Speed::VeryHigh);
+    // let sd_spi_bus_ref_cell = RefCell::new(sd_spi_bus);
+    // let sd_spi_device = RefCellDevice::new(&sd_spi_bus_ref_cell, sd_cs, Delay);
 
-    let sd_spi_bus_ref_cell = RefCell::new(sd_spi_bus);
-    let sd_spi_device = RefCellDevice::new(&sd_spi_bus_ref_cell, sd_cs, Delay);
-
-    let sdcard = SdCard::new(sd_spi_device.unwrap(), Delay);
-    println!("Card size is {} bytes", sdcard.num_bytes().unwrap());
-    let volume_mgr = VolumeManager::new(sdcard, TimeSink::new());
-    let volume0 = volume_mgr.open_volume(VolumeIdx(0)).unwrap();
-    let root_dir = volume0.open_root_dir().unwrap();
-    let my_file = root_dir.open_file_in_dir("MY_FILE.TXT", Mode::ReadOnly).unwrap();
-    while !my_file.is_eof() {
-        let mut buffer = [0u8; 32];
-        let num_read = my_file.read(&mut buffer).unwrap();
-        for b in &buffer[0..num_read] {
-            info!("{}", *b as char);
-        }
-    }
-    info!("Sd write and setup complete");
+    // let sdcard = SdCard::new(sd_spi_device.unwrap(), Delay);
+    // println!("Card size is {} bytes", sdcard.num_bytes().unwrap());
+    // let volume_mgr = VolumeManager::new(sdcard, TimeSink::new());
+    // let volume0 = volume_mgr.open_volume(VolumeIdx(0)).unwrap();
+    // let root_dir = volume0.open_root_dir().unwrap();
+    // let my_file = root_dir.open_file_in_dir("MY_FILE.TXT", Mode::ReadOnly).unwrap();
+    // while !my_file.is_eof() {
+    //     let mut buffer = [0u8; 32];
+    //     let num_read = my_file.read(&mut buffer).unwrap();
+    //     for b in &buffer[0..num_read] {
+    //         info!("{}", *b as char);
+    //     }
+    // }
+    // info!("Sd write and setup complete");
 
     // --- GPS Setup ---
     let mut gps_enable = Output::new(p.PA4, Level::Low, Speed::Low); 
     let mut gps_reset = Output::new(p.PB2, Level::Low, Speed::Low); 
     let mut uart_gps_config = UartConfig::default();
     uart_gps_config.baudrate = 9600; 
+    uart_gps_config.data_bits = embassy_stm32::usart::DataBits::DataBits8;
+    uart_gps_config.parity = embassy_stm32::usart::Parity::ParityNone;
+    uart_gps_config.stop_bits = embassy_stm32::usart::StopBits::STOP1;
     // let uart_gps = Uart::new_blocking(
     //     p.UART8,  p.PE0, p.PE1, uart_gps_config
     // ).unwrap();
 
-    let uart_gps = Uart::new(
-        p.UART8, p.PE0, p.PE1, Irqs, p.DMA1_CH2, p.DMA1_CH3, uart_config
+    let mut uart_gps = Uart::new(
+        p.UART8, p.PE0, p.PE1, Irqs, p.DMA1_CH6, p.DMA1_CH5, uart_config
     ).unwrap();
 
     let (mut gps_tx, gps_rx) = uart_gps.split();
-    static mut RX_GPS_BUF: [u8; GPS_BUFFER_SIZE] = [0; GPS_BUFFER_SIZE];
     let ring_gps_rx = gps_rx.into_ring_buffered(unsafe { &mut RX_GPS_BUF });
 
     gps_reset.set_low();
-    cortex_m::asm::delay(300_000);
+    Delay.delay_ms(300);
     gps_reset.set_high();
-    gps_enable.set_low();
-
     gps_enable.set_low();
     let packet: [u8; 28] = CfgPrtUartBuilder {
         portid: UartPortId::Uart1,
@@ -493,7 +529,9 @@ async fn main(spawner: Spawner) {
     }
     .into_packet_bytes();
 
-    gps_tx.blocking_write(&packet).unwrap();
+    gps_tx.write(&packet).await;
+
+
 
     // --- Boom Boom Setup --- 
     /*
@@ -533,35 +571,42 @@ async fn main(spawner: Spawner) {
     info!("ADC measurement drogue ematch {}", adc.blocking_read(&mut drogue_mcu_ematch_sense));
     info!("ADC measurement drogue B ematch {}", adc.blocking_read(&mut drogue_mcu_ematch_sense_b));
     
-    // --- Buzzer 🐝 ---
+    // --- Camera Triggers ---
+    let mut cam_trigger = Output::new(p.PE14, Level::Low, Speed::Low);
+    let mut cam_trigger_b = Output::new(p.PE12, Level::Low, Speed::Low);
+
+    // // --- Buzzer 🐝 ---
     let buzz_out_pin = PwmPin::new_ch1(p.PC6, OutputType::PushPull);
     let mut pwm = SimplePwm::new(p.TIM3, Some(buzz_out_pin), None, None, None, khz(4), Default::default());
     let mut ch1 = pwm.ch1();
-    ch1.set_duty_cycle_fraction(ch1.max_duty_cycle(), 4); 
+    info!("Duty Cycle: {}", ch1.max_duty_cycle());
+    ch1.set_duty_cycle(ch1.max_duty_cycle() / 4);
     ch1.enable();   
-
-    music::play_song(&mut pwm, music::MARIO_MELODY, 100).await;
+    // music::play_song(&mut pwm, music::MARIO_MELODY, 100).await;
 
     // --- State Machine ---
     let state_machine = StateMachine::new(traits::Context {});
 
-    // --- AI ---
-    // Get a default device for the backend
-    let device = BackendDevice::default();
 
-    // Create a new model and load the state
-    let model: Model<Backend> = Model::default();
 
-    let output = run_model(&model, &device, 1.0);
+    // // --- AI ---
+    // // Get a default device for the backend
+    // let device = BackendDevice::default();
+
+    // // Create a new model and load the state
+    // let model: Model<Backend> = Model::default();
+
+    // let output = run_model(&model, &device, 1.0);
 
     // NOTE 
     // Creating multiple executor instances is supported, to run tasks with multiple priority levels. This allows higher-priority tasks to preempt lower-priority tasks.
 
     // --- Spawning Tasks ---
     spawner.must_spawn(led_blinker_task(p.PB14));
-    spawner.must_spawn(uart_dma_reader_task(ring_rx));
-    spawner.must_spawn(uart_gps_dma_reader_task(ring_gps_rx, gps_tx));
-    spawner.must_spawn(sbg_parser_task(tx));
+    // spawner.must_spawn(uart_dma_reader_task(ring_rx));
+    // spawner.must_spawn(uart_gps_dma_reader_task(ring_gps_rx, gps_tx));
+    // spawner.must_spawn(sbg_parser_task(tx));
+    // spawner.must_spawn(sbg_receiver_task());
     spawner.must_spawn(baro_reader_task(baro));
 
     // pass control of the spawner to the state machine
