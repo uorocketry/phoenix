@@ -98,3 +98,15 @@ debug = true
 [profile.release.package.sbg-rs]
 debug = true
 opt-level = 0
+
+[profile.release.build-override]
+opt-level = 0
+
+[profile.release]
+codegen-units = 1
+debug = 2
+debug-assertions = false # <-
+incremental = false
+# lto = 'thin'
+opt-level = 3            # <-
+overflow-checks = false  # <-

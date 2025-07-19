@@ -7,6 +7,7 @@ mod sbg_manager;
 mod traits;
 mod music;
 mod model;
+mod imu;
 
 use embedded_hal_1::delay::DelayNs;
 use embedded_hal_1::digital::{OutputPin, PinState};
@@ -230,25 +231,29 @@ async fn sbg_receiver_task() {
             Some(x) => {
                 match x {
                     messages_prost::sensor::sbg::sbg_data::Data::GpsPos(gps_pos) => {
-                        info!("Received SBG GPS Position: {:?}", gps_pos.time_stamp);
+                        // info!("Received SBG GPS Position: {:?}", gps_pos.time_stamp);
                     },
                     messages_prost::sensor::sbg::sbg_data::Data::UtcTime(utc_time) => {
-                        info!("Received SBG UTC Time: {:?}", utc_time.time_stamp);
+                        // info!("Received SBG UTC Time: {:?}", utc_time.time_stamp);
                     },
                     messages_prost::sensor::sbg::sbg_data::Data::Imu(imu) => {
-                        info!("Received SBG IMU data: {:?}", imu.time_stamp);
+                        // info!("Received SBG IMU data: {:?}", imu.time_stamp);
                     },
                     messages_prost::sensor::sbg::sbg_data::Data::EkfQuat(ekf_quat) => {
-                        info!("Received SBG EKF Quaternion: {:?}", ekf_quat.time_stamp);
+                        // info!("Received SBG EKF Quaternion: {:?}", ekf_quat.time_stamp);
                     },
                     messages_prost::sensor::sbg::sbg_data::Data::EkfNav(ekf_nav) => {
-                        info!("Received SBG EKF Navigation: {:?}", ekf_nav.time_stamp);
+                        // info!("Received SBG EKF Navigation: {:?}", ekf_nav.time_stamp);
                     },
                     messages_prost::sensor::sbg::sbg_data::Data::GpsVel(gps_vel) => {
-                        info!("Received SBG GPS Velocity: {:?}", gps_vel.time_stamp);
+                        // info!("Received SBG GPS Velocity: {:?}", gps_vel.time_stamp);
                     },
                     messages_prost::sensor::sbg::sbg_data::Data::Air(air) => {
-                        info!("Received SBG Air data: {:?}", air.time_stamp );
+                        if let Some(air_data) = air.data {
+                            info!("Air data: Pressure: {}, Altitude: {}, Temperature: {}", air_data.pressure_abs, air_data.altitude, air_data.air_temperature);
+                        } else {
+                            info!("Received SBG Air Data with no data field.");
+                        }
                     },
                 }
             },
@@ -265,59 +270,69 @@ async fn baro_reader_task(mut baro: Ms5611<Spi<'static, Blocking>, Output<'stati
     const MAIN_HEIGHT: f32 = GROUND_HEIGHT + 500.0; // meters ASL
     const HEIGHT_MIN: f32 = GROUND_HEIGHT + 300.0; // meters ASL
     const GROUND_HEIGHT: f32 = 300.0; // meters ASL
-    const TICK_RATE: f32 = 0.002; // seconds 
-    const ASCENT_LOCKOUT: f32 = 100.0; 
-    const DATA_POINTS: usize = 8;
-    const VALID_DESCENT_RATE: f32 = -1.0; // meters per second
+    const ASCENT_LOCKOUT: f32 = 0.1; 
+    const DATA_POINTS: usize = 20;
+    const VALID_DESCENT_RATE: f32 = -0.001; // meters per millise
 
-    let mut historical_barometer_altitude: HistoryBuffer<f32, 8> = HistoryBuffer::new();
+    let mut historical_barometer_altitude: HistoryBuffer<(f32, Instant), 20> = HistoryBuffer::new();
 
-    let mut last_reading_time = Instant::now();
     loop {
-        match baro.read_pressure_temperature(OversamplingRatio::Osr512) {
+        match baro.read_pressure_temperature(OversamplingRatio::Osr4096) {
             Ok(reading) => {
-                info!(
-                    "Baro: Temp: {} C, Pressure: {} mbar",
-                    reading.0, reading.1
-                );
-                // Hypsometric Formula 
-                // replace reading.0 with better temperature source
-                let altitude = ((powf(1013.25 / reading.1, 1.0/5.257) - 1.0) * (reading.0 + 237.15)) / 0.0065;  
-                historical_barometer_altitude.write(altitude);
-                {
-                    if historical_barometer_altitude.len() < 8 {
-                        info!("not enough data points");
-                        continue;
-                    }
-                    let mut buf = historical_barometer_altitude.oldest_ordered();
-                    match buf.next() {
-                        Some(last) => {
-                            let mut avg_sum: f32 = 0.0;
-                            let mut prev = last;
-                            for i in buf {
-                                // readings should never exceed a gap of max u64 so conversion is acceptable and won't wrap. 
-                                let time_diff: f32 = Instant::now().duration_since(last_reading_time).as_secs() as f32;
-                                info!("prev alt: {:?}, new alt: {}, time diff {}", prev, i, time_diff);
-                
-                                if time_diff == 0.0 {
-                                    continue;
-                                }
-                                let slope = (i - prev) / time_diff;
-                                if slope > ASCENT_LOCKOUT {
-                                    continue;
-                                }
-                                avg_sum += slope;
-                                prev = i;
-                
-                                // Check if the average descent rate is valid
-                                if avg_sum / (DATA_POINTS as f32 - 1.0) <= VALID_DESCENT_RATE {
-                                    info!("Apogee: avg_sum: {}", avg_sum / (DATA_POINTS as f32 - 1.0));
-                                    // todo!("Send Apog ovee eventer events channel to state machine to process.");
-                                }
-                            }
+                // info!(
+                //     "Baro: Temp: {} C, Pressure: {} mbar",
+                //     reading.0, reading.1
+                // );
+
+                // Hypsometric Formula
+                let altitude = ((powf(101.325 / reading.1, 1.0/5.257) - 1.0) * (25.0 + 273.15)) / 0.0065;
+                historical_barometer_altitude.write((altitude, Instant::now()));
+
+                // Apogee detection logic
+                if historical_barometer_altitude.len() < 8 {
+                    info!("not enough data points to detect apogee");
+                    continue;
+                }
+
+                // FIX 3: Reworked logic to use stored timestamps for accurate slope calculation.
+                let mut buf = historical_barometer_altitude.oldest_ordered();
+                if let Some(mut prev_reading) = buf.next() { // `prev_reading` is now a tuple: (f32, Instant)
+                    let mut avg_sum: f32 = 0.0;
+                    let mut datapoints_used = 0;
+
+                    for current_reading in buf { // `current_reading` is also a tuple
+                        // Calculate time diff between the actual measurement times.
+                        // Convert from micros to seconds for a more standard rate unit (meters/sec).
+                        let time_diff = current_reading.1.duration_since(prev_reading.1).as_millis();
+
+                        // info!(
+                        //     "prev alt: {}, new alt: {}, time diff: {} ms",
+                        //     prev_reading.0, current_reading.0, time_diff
+                        // );
+
+                        if time_diff == 0 {
+                            continue; // Avoid division by zero
                         }
-                        None => {
+
+                        let slope = (current_reading.0 - prev_reading.0) / time_diff as f32;
+                        // info!("Slope: {} m/ms", slope);
+                        // Your existing logic for ascent lockout
+                        if slope > ASCENT_LOCKOUT {
                             continue;
+                        }
+
+                        avg_sum += slope;
+                        datapoints_used += 1;
+                        prev_reading = current_reading; // Update to the current reading for the next iteration
+                    }
+
+                    // Check if the average descent rate is valid
+                    if datapoints_used > 0 {
+                        let avg_slope = avg_sum / (datapoints_used as f32);
+                        info!("Average slope: {} m/ms", avg_slope);
+                        if avg_slope <= VALID_DESCENT_RATE {
+                            // info!("Apogee detected! Average vertical speed: {} m/s", avg_slope * 1000.0);
+                            // todo!("Send Apogee event over events channel to state machine to process.");
                         }
                     }
                 }
@@ -326,7 +341,7 @@ async fn baro_reader_task(mut baro: Ms5611<Spi<'static, Blocking>, Output<'stati
                 // error!("Baro: Driver reading failed: {:?}", e);
             }
         }
-        Timer::after(Duration::from_millis(1000)).await;
+        Timer::after(Duration::from_millis(100)).await;
     }
 }
 
@@ -431,6 +446,36 @@ async fn main(spawner: Spawner) {
     // let (tx, rx) = gps_uart.split();
     // static mut RX_BUF: [u8; SBG_BUFFER_SIZE] = [0; SBG_BUFFER_SIZE];
     // let ring_rx = rx.into_ring_buffered(unsafe { &mut RX_BUF });
+
+    // --- IMU Setup --- 
+    let mut imu_spi_config = SpiConfig::default();
+    imu_spi_config.frequency = mhz(10);
+    let imu_spi = Spi::new(
+        p.SPI3, p.PC10, p.PB5, p.PB4, p.DMA2_CH5, p.DMA2_CH6, imu_spi_config,
+    );
+    let imu_cs = Output::new(p.PB6, Level::High, Speed::Low);
+    let mut imu = imu::Iim20670::new(imu_spi, imu_cs, Delay).await.unwrap();
+
+    // loop {
+    //     let data = imu.read_accel().await;
+    //     let data2 = imu.read_gyro().await;
+    //     Timer::after(Duration::from_millis(100)).await;
+    //     match data {
+    //         Ok(accel) => {
+    //             info!("Accel: x: {}, y: {}, z: {}", accel[0], accel[1], accel[2]);
+    //         }
+    //         Err(e) => {
+    //         }
+    //     }
+
+    //     match data2 {
+    //         Ok(gyro) => {
+    //             info!("Gyro: x: {}, y: {}, z: {}", gyro[0], gyro[1], gyro[2]);
+    //         }
+    //         Err(e) => {
+    //         }
+    //     }
+    // }
 
     // --- SBG Setup ---
     let mut uart_config = UartConfig::default();
@@ -603,11 +648,11 @@ async fn main(spawner: Spawner) {
 
     // --- Spawning Tasks ---
     spawner.must_spawn(led_blinker_task(p.PB14));
-    // spawner.must_spawn(uart_dma_reader_task(ring_rx));
+    spawner.must_spawn(uart_dma_reader_task(ring_rx));
     // spawner.must_spawn(uart_gps_dma_reader_task(ring_gps_rx, gps_tx));
-    // spawner.must_spawn(sbg_parser_task(tx));
-    // spawner.must_spawn(sbg_receiver_task());
-    spawner.must_spawn(baro_reader_task(baro));
+    spawner.must_spawn(sbg_parser_task(tx));
+    spawner.must_spawn(sbg_receiver_task());
+    // spawner.must_spawn(baro_reader_task(baro));
 
     // pass control of the spawner to the state machine
     spawner.must_spawn(sm_task(spawner, state_machine));
