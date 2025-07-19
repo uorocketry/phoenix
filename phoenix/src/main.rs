@@ -449,16 +449,23 @@ async fn main(spawner: Spawner) {
 
     // --- IMU Setup --- 
     let mut imu_spi_config = SpiConfig::default();
-    imu_spi_config.frequency = mhz(10);
-    let imu_spi = Spi::new(
-        p.SPI3, p.PC10, p.PB5, p.PB4, p.DMA2_CH5, p.DMA2_CH6, imu_spi_config,
+    imu_spi_config.frequency = mhz(8);
+    imu_spi_config.mode = embassy_stm32::spi::Mode {
+        polarity: embassy_stm32::spi::Polarity::IdleHigh,
+        phase: embassy_stm32::spi::Phase::CaptureOnSecondTransition,
+    };
+    // let imu_spi = Spi::new(
+    //     p.SPI3, p.PC10, p.PB5, p.PB4, p.DMA2_CH5, p.DMA2_CH6, imu_spi_config,
+    // );
+    let imu_spi = Spi::new_blocking(
+        p.SPI3, p.PC10, p.PB5, p.PB4, imu_spi_config,
     );
     let imu_cs = Output::new(p.PB6, Level::High, Speed::Low);
-    let mut imu = imu::Iim20670::new(imu_spi, imu_cs, Delay).await.unwrap();
+    // let mut imu = imu::Iim20670::new(imu_spi, imu_cs, Delay).unwrap();
 
     // loop {
-    //     let data = imu.read_accel().await;
-    //     let data2 = imu.read_gyro().await;
+    //     let data = imu.read_accel();
+    //     let data2 = imu.read_gyro();
     //     Timer::after(Duration::from_millis(100)).await;
     //     match data {
     //         Ok(accel) => {
@@ -509,34 +516,35 @@ async fn main(spawner: Spawner) {
 
 
     // --- SD Card ---
-    // let mut sd_spi_config = SpiConfig::default();
+    let mut sd_spi_config = SpiConfig::default();
 
-    // sd_spi_config.frequency = mhz(16);
-    // sd_spi_config.bit_order = BitOrder::MsbFirst;
+    sd_spi_config.frequency = mhz(16);
+    sd_spi_config.bit_order = BitOrder::MsbFirst;
 
-    // let sd_spi_bus = Spi::new_blocking(
-    //     p.SPI1, p.PA5, p.PA7, p.PA6, sd_spi_config,
-    // );
+    let mut sd_spi_bus = Spi::new_blocking(
+        p.SPI1, p.PA5, p.PA7, p.PA6, sd_spi_config,
+    );
 
-    // let sd_cs = Output::new(p.PB9, Level::High, Speed::VeryHigh);
+    let sd_cs = Output::new(p.PE9, Level::High, Speed::Low);
+    let data: [u8; 10] = [0xFF; 10];
+    sd_spi_bus.blocking_write(&data).unwrap();
 
-    // let sd_spi_bus_ref_cell = RefCell::new(sd_spi_bus);
-    // let sd_spi_device = RefCellDevice::new(&sd_spi_bus_ref_cell, sd_cs, Delay);
-
-    // let sdcard = SdCard::new(sd_spi_device.unwrap(), Delay);
-    // println!("Card size is {} bytes", sdcard.num_bytes().unwrap());
-    // let volume_mgr = VolumeManager::new(sdcard, TimeSink::new());
-    // let volume0 = volume_mgr.open_volume(VolumeIdx(0)).unwrap();
-    // let root_dir = volume0.open_root_dir().unwrap();
-    // let my_file = root_dir.open_file_in_dir("MY_FILE.TXT", Mode::ReadOnly).unwrap();
-    // while !my_file.is_eof() {
-    //     let mut buffer = [0u8; 32];
-    //     let num_read = my_file.read(&mut buffer).unwrap();
-    //     for b in &buffer[0..num_read] {
-    //         info!("{}", *b as char);
-    //     }
-    // }
-    // info!("Sd write and setup complete");
+    let sd_spi_bus_ref_cell = RefCell::new(sd_spi_bus);
+    let sd_spi_device = RefCellDevice::new(&sd_spi_bus_ref_cell, sd_cs, Delay);
+    let sdcard = SdCard::new(sd_spi_device.unwrap(), Delay);
+    println!("Card size is {} bytes", sdcard.num_bytes().unwrap());
+    let volume_mgr = VolumeManager::new(sdcard, TimeSink::new());
+    let volume0 = volume_mgr.open_volume(VolumeIdx(0)).unwrap();
+    let root_dir = volume0.open_root_dir().unwrap();
+    let my_file = root_dir.open_file_in_dir("MY_FILE.TXT", Mode::ReadOnly).unwrap();
+    while !my_file.is_eof() {
+        let mut buffer = [0u8; 32];
+        let num_read = my_file.read(&mut buffer).unwrap();
+        for b in &buffer[0..num_read] {
+            info!("{}", *b as char);
+        }
+    }
+    info!("Sd write and setup complete");
 
     // --- GPS Setup ---
     let mut gps_enable = Output::new(p.PA4, Level::Low, Speed::Low); 

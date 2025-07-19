@@ -105,8 +105,8 @@ opt-level = 0
 [profile.release]
 codegen-units = 1
 debug = 2
-debug-assertions = false # <-
+debug-assertions = false 
 incremental = false
 # lto = 'thin'
-opt-level = 3            # <-
-overflow-checks = false  # <-
+opt-level = 3            
+overflow-checks = false  
