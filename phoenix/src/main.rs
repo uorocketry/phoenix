@@ -449,10 +449,10 @@ async fn main(spawner: Spawner) {
 
     // --- IMU Setup --- 
     let mut imu_spi_config = SpiConfig::default();
-    imu_spi_config.frequency = mhz(8);
+    imu_spi_config.frequency = mhz(10);
     imu_spi_config.mode = embassy_stm32::spi::Mode {
-        polarity: embassy_stm32::spi::Polarity::IdleHigh,
-        phase: embassy_stm32::spi::Phase::CaptureOnSecondTransition,
+        polarity: embassy_stm32::spi::Polarity::IdleLow,
+        phase: embassy_stm32::spi::Phase::CaptureOnFirstTransition,
     };
     // let imu_spi = Spi::new(
     //     p.SPI3, p.PC10, p.PB5, p.PB4, p.DMA2_CH5, p.DMA2_CH6, imu_spi_config,
@@ -461,7 +461,8 @@ async fn main(spawner: Spawner) {
         p.SPI3, p.PC10, p.PB5, p.PB4, imu_spi_config,
     );
     let imu_cs = Output::new(p.PB6, Level::High, Speed::Low);
-    // let mut imu = imu::Iim20670::new(imu_spi, imu_cs, Delay).unwrap();
+    let imu_nreset = Output::new(p.PD4, Level::Low, Speed::Low);
+    let mut imu = imu::Iim20670::new(imu_spi, imu_cs, Some(imu_nreset), Delay).unwrap();
 
     // loop {
     //     let data = imu.read_accel();
@@ -602,13 +603,14 @@ async fn main(spawner: Spawner) {
         DROGUE_MCU_EMATCH_SENSE_B = PC5
      */
 
-    let main_arm_test = Input::new(p.PD6, Pull::Down);
-    let main_arm_test_b = Input::new(p.PD14, Pull::Down); 
-    let drogue_arm_test = Input::new(p.PC11, Pull::Down);
-    let drogue_arm_test_b = Input::new(p.PD2, Pull::Down);
+    // let main_arm_test = Input::new(p.PD6, Pull::Down);
+    let mut main_arm_test = Output::new(p.PD6, Level::Low, Speed::Low);
+    let main_arm_test_b = Output::new(p.PD14, Level::Low, Speed::Low);
+    let drogue_arm_test = Output::new(p.PC11, Level::Low, Speed::Low);
+    let drogue_arm_test_b = Output::new(p.PD2, Level::Low, Speed::Low);
 
-    let main_fire = Output::new(p.PD5, Level::Low, Speed::Low);
-    let main_fire_b = Output::new(p.PD13, Level::Low, Speed::Low);
+    let mut main_fire = Output::new(p.PD5, Level::Low, Speed::Low);
+    let mut main_fire_b = Output::new(p.PD13, Level::Low, Speed::Low);
     let drogue_fire = Output::new(p.PC12, Level::Low, Speed::Low);
     let drogue_fire_b = Output::new(p.PD1, Level::Low, Speed::Low);
 
@@ -623,7 +625,8 @@ async fn main(spawner: Spawner) {
     info!("ADC measurement main B ematch {}", adc.blocking_read(&mut main_mcu_ematch_sense_b));
     info!("ADC measurement drogue ematch {}", adc.blocking_read(&mut drogue_mcu_ematch_sense));
     info!("ADC measurement drogue B ematch {}", adc.blocking_read(&mut drogue_mcu_ematch_sense_b));
-    
+    info!("ADC measurement main ematch {}", adc.blocking_read(&mut main_mcu_ematch_sense));
+
     // --- Camera Triggers ---
     let mut cam_trigger = Output::new(p.PE14, Level::Low, Speed::Low);
     let mut cam_trigger_b = Output::new(p.PE12, Level::Low, Speed::Low);
