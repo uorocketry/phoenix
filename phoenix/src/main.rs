@@ -12,6 +12,9 @@ mod imu;
 use embedded_hal_1::delay::DelayNs;
 use embedded_hal_1::digital::{OutputPin, PinState};
 use libm::powf;
+use messages_prost::mavlink;
+use messages_prost::mavlink::peek_reader::PeekReader;
+use messages_prost::mavlink::uorocketry::MavMessage;
 use messages_prost::sensor::gps;
 use core::cell::RefCell;
 use core::marker::PhantomData;
@@ -67,8 +70,9 @@ static HEAP: Heap = Heap::empty();
 
 static SBG_CHANNEL: Channel<CriticalSectionRawMutex, SbgData, 10> = Channel::new();
 static BUFFER_CHANNEL: Channel<CriticalSectionRawMutex, DmaBuffer, 10> = Channel::new();
+static EVENT_CHANNEL: Channel<CriticalSectionRawMutex, Events, 2> = Channel::new();
 // static FAULT_CHANNEL: Channel<CriticalSectionRawMutex, , 2> = Channel::new();
-
+static RADIO_CHANNEL: Channel<CriticalSectionRawMutex, [u8; 255], 10> = Channel::new();
 #[link_section = ".axisram.buffers"]
 static mut RX_SBG_BUF: [u8; SBG_BUFFER_SIZE] = [0; SBG_BUFFER_SIZE];
 
@@ -84,6 +88,7 @@ pub static RTC: Mutex<CriticalSectionRawMutex, RefCell<Option<Rtc>>> =
 bind_interrupts!(struct Irqs {
     UART4 => usart::InterruptHandler<peripherals::UART4>;
     UART8 => usart::InterruptHandler<peripherals::UART8>;
+    UART7 => usart::InterruptHandler<peripherals::UART7>;
 });
 
 statemachine! {
@@ -91,9 +96,9 @@ statemachine! {
         *Init + Start = WaitForLaunch,
         WaitForLaunch + Launch = Ascent,
         Ascent + Apogee = Descent,
-        Descent + MainDeployment = Fuck, 
-        Descent + DrogueDeployment = DrogueDescent, 
-        DrogueDescent + MainDeployment =  MainDescent,
+        Descent + MainDeployment = Fuck,
+        Descent + DrogueDeployment = DrogueDescent,
+        DrogueDescent + MainDeployment = MainDescent,
         MainDescent + NoMovement = Landed,
         Fault + FaultCleared = _,
         _ + FaultDetected = Fault,
@@ -218,7 +223,6 @@ async fn sbg_parser_task(tx: UartTx<'static, mode::Async>) {
     let mut sbg = sbg_manager::SBGManager::new(tx);
     loop {
         let full_buffer = BUFFER_CHANNEL.receive().await;
-        // info!("Received SBG data: {:?}", full_buffer);
         sbg.sbg_device.read_data(&full_buffer.try_into().unwrap());
     }
 }
@@ -231,7 +235,7 @@ async fn sbg_receiver_task() {
             Some(x) => {
                 match x {
                     messages_prost::sensor::sbg::sbg_data::Data::GpsPos(gps_pos) => {
-                        // info!("Received SBG GPS Position: {:?}", gps_pos.time_stamp);
+                        // info!("Received SBG GPS Position: {:?}", gps_pos);
                     },
                     messages_prost::sensor::sbg::sbg_data::Data::UtcTime(utc_time) => {
                         // info!("Received SBG UTC Time: {:?}", utc_time.time_stamp);
@@ -294,7 +298,6 @@ async fn baro_reader_task(mut baro: Ms5611<Spi<'static, Blocking>, Output<'stati
                     continue;
                 }
 
-                // FIX 3: Reworked logic to use stored timestamps for accurate slope calculation.
                 let mut buf = historical_barometer_altitude.oldest_ordered();
                 if let Some(mut prev_reading) = buf.next() { // `prev_reading` is now a tuple: (f32, Instant)
                     let mut avg_sum: f32 = 0.0;
@@ -345,11 +348,60 @@ async fn baro_reader_task(mut baro: Ms5611<Spi<'static, Blocking>, Output<'stati
     }
 }
 
+#[embassy_executor::task]
+async fn radio_reader_task(mut rx: RingBufferedUartRx<'static>) {
+    loop {
+        let mut buf: [u8; 256] = [0; 256];
+        if let Ok(len) = rx.read(&mut buf).await {
+            if len > 0 {
+                // Process the received data
+                info!("Received {} bytes from radio: {:?}", len, &buf[..len]);
+                let (_header, msg): (_, MavMessage) =
+                    mavlink::read_versioned_msg(&mut PeekReader::new(&buf[..len]), mavlink::MavlinkVersion::V2).unwrap();
+
+                match msg {
+                    mavlink::uorocketry::MavMessage::POSTCARD_MESSAGE(msg) => {
+                    }
+                    mavlink::uorocketry::MavMessage::COMMAND_MESSAGE(command) => {
+                    }
+                    mavlink::uorocketry::MavMessage::HEARTBEAT(_) => {
+                    }
+                    _ => {
+                        // info!("Received unknown MAVLink message: {:?}", msg);
+                    }
+                }
+            }
+        }
+        Timer::after(Duration::from_millis(100)).await;
+    }
+}
+
+#[embassy_executor::task]
+async fn radio_writer_task(mut tx: UartTx<'static, mode::Async>) {
+    loop {
+        let data = RADIO_CHANNEL.receive().await;
+
+        let mav_header = mavlink::MavHeader {
+            system_id: 1,
+            component_id: 1,
+            sequence: 1,
+        };
+
+        let mav_message = mavlink::uorocketry::MavMessage::POSTCARD_MESSAGE(
+            mavlink::uorocketry::POSTCARD_MESSAGE_DATA {
+                message: data,
+            },
+        );
+
+        mavlink::write_versioned_msg_async(&mut tx, mavlink::MavlinkVersion::V2, mav_header, &mav_message).await;
+    }
+}
+
 #[embassy_executor::task] 
 async fn sm_task(spawner: Spawner, state_machine: StateMachine<Context>) {
     info!("State Machine task started.");
 
-    loop {
+    loop {  
         match state_machine.state {
             States::Ascent => {
 
@@ -643,7 +695,16 @@ async fn main(spawner: Spawner) {
     // --- State Machine ---
     let state_machine = StateMachine::new(traits::Context {});
 
+    // --- Radio --- 
+    let mut uart_radio_config = UartConfig::default();
+    uart_radio_config.baudrate = 57600; 
+    uart_radio_config.data_bits = embassy_stm32::usart::DataBits::DataBits8;
+    uart_radio_config.parity = embassy_stm32::usart::Parity::ParityNone;
+    uart_radio_config.stop_bits = embassy_stm32::usart::StopBits::STOP1;
 
+    let mut uart_radio = Uart::new(
+        p.UART7, p.PE7, p.PE8, Irqs, p.DMA2_CH3, p.DMA2_CH5, uart_radio_config
+    ).unwrap();
 
     // // --- AI ---
     // // Get a default device for the backend
@@ -659,6 +720,7 @@ async fn main(spawner: Spawner) {
 
     // --- Spawning Tasks ---
     spawner.must_spawn(led_blinker_task(p.PB14));
+
     spawner.must_spawn(uart_dma_reader_task(ring_rx));
     // spawner.must_spawn(uart_gps_dma_reader_task(ring_gps_rx, gps_tx));
     spawner.must_spawn(sbg_parser_task(tx));
