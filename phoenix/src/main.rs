@@ -20,7 +20,12 @@ use core::cell::RefCell;
 use core::marker::PhantomData;
 use defmt::*;
 use embedded_alloc::LlffHeap as Heap;
-use burn::{backend::NdArray, tensor::Tensor};
+use burn::{
+    backend::NdArray,
+    module::Module, // <-- FIX: Trait needed for .load_record()
+    prelude::*,
+    record::{BinBytesRecorder, Recorder, FullPrecisionSettings}, // <-- FIX: Use BinBytesRecorder
+};
 use embassy_executor::Spawner;
 use embassy_stm32::adc::Adc;
 use embassy_stm32::gpio::{Input, Level, Output, OutputType, Pull, Speed};
@@ -34,9 +39,10 @@ use embassy_stm32::{bind_interrupts, mode, peripherals, rcc, usart};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::blocking_mutex::Mutex;
 use embassy_sync::channel::Channel;
+use embassy_sync::signal::Signal;
 use embassy_time::{Delay, Duration, Instant, Timer};
 // use embedded_alloc::Heap;
-use heapless::HistoryBuffer;
+use heapless::{HistoryBuffer, Vec};
 use messages_prost::sensor::sbg::SbgData;
 use sbg_rs::sbg::SBG_BUFFER_SIZE;
 use static_cell::StaticCell;
@@ -52,7 +58,7 @@ use common_arm::drivers::ms5611::{Ms5611, OversamplingRatio};
 // Use the asynchronous SpiDevice from embassy-embedded-hal
 
 use smlang::statemachine;
-use crate::model::sine::Model;
+// use crate::model::sine::Model;
 // =================================================================================
 // Shared Resources & Types
 // =================================================================================
@@ -67,6 +73,8 @@ const GPS_BUFFER_SIZE: usize = 256;
 
 #[global_allocator]
 static HEAP: Heap = Heap::empty();
+
+static PRESSURE_SIGNAL: Signal<CriticalSectionRawMutex, (f32, u8, Instant)> = Signal::new();
 
 static SBG_CHANNEL: Channel<CriticalSectionRawMutex, SbgData, 10> = Channel::new();
 static BUFFER_CHANNEL: Channel<CriticalSectionRawMutex, DmaBuffer, 10> = Channel::new();
@@ -129,6 +137,81 @@ impl embedded_sdmmc::TimeSource for TimeSink {
         }
     }
 }
+type AiBackend = NdArray<f32>;
+type AiDevice = <AiBackend as burn::tensor::backend::Backend>::Device;
+
+const SEQ_LENGTH: usize = 50;
+const NUM_FEATURES: usize = 12;
+
+// --- PASTE CONSTANTS FROM PYTHON SCRIPT HERE ---
+// Replace these dummy values with the actual output from clean_rocket_data.py
+const SCALE_MIN: [f32; NUM_FEATURES] = [0.0f32; 12];
+const SCALE_MAX: [f32; NUM_FEATURES] = [1.0f32; 12];
+// ------------------------------------------------
+
+/// Normalizes a single feature value using the pre-calculated min/max.
+fn normalize_value(value: f32, min: f32, max: f32) -> f32 {
+    if (max - min) == 0.0 {
+        return 0.0; // Avoid division by zero
+    }
+    (value - min) / (max - min)
+}
+
+#[embassy_executor::task]
+async fn ai_task() {
+    info!("AI Inference Task starting...");
+
+    let device = AiDevice::default();
+
+    // 1. Create the model structure
+    info!("Initializing model structure...");
+    let model: model::LstmNetwork<AiBackend> = model::LstmNetwork::new(&device);
+
+    // 2. Load the trained weights from the embedded file
+    info!("Loading trained weights...");
+    let recorder = BinBytesRecorder::<FullPrecisionSettings>::new();
+    let record_bytes = include_bytes!("models/tte.mpk");
+    let record = recorder
+        .load(record_bytes.to_vec(), &device)
+        .expect("Failed to load model weights");
+    let model = model.load_record(record);
+    info!("Model loaded successfully.");
+
+    let mut sensor_history: HistoryBuffer<[f32; NUM_FEATURES], SEQ_LENGTH> = HistoryBuffer::new();
+
+    loop {
+        let latest_sensor_data: [f32; NUM_FEATURES] = [0.0; 12]; // Dummy data
+
+        let mut normalized_data = [0.0f32; NUM_FEATURES];
+        for i in 0..NUM_FEATURES {
+            normalized_data[i] = normalize_value(latest_sensor_data[i], SCALE_MIN[i], SCALE_MAX[i]);
+        }
+        sensor_history.write(normalized_data);
+
+        if sensor_history.len() == sensor_history.capacity() {
+            let mut flat_history: Vec<f32, { SEQ_LENGTH * NUM_FEATURES }> = Vec::new();
+            for frame in sensor_history.iter() {
+                for value in frame.iter() {
+                    flat_history.push(*value).ok();
+                }
+            }
+
+            let input = Tensor::<AiBackend, 3>::from_floats(flat_history.as_slice(), &device)
+                .reshape([1, SEQ_LENGTH, NUM_FEATURES]);
+
+            let output_log = model.forward(input);
+            let output_sec = (output_log.exp() - 1.0).into_data();
+            let predictions = output_sec.as_slice::<f32>().unwrap();
+
+            info!("PREDICTIONS -> Burnout: {=f32}s, Apogee: {=f32}s, Impact: {=f32}s",
+                predictions[0], predictions[1], predictions[2]
+            );
+        }
+
+        Timer::after(Duration::from_millis(100)).await; // Run at 10Hz
+    }
+}
+
 
 // =================================================================================
 // Application Tasks
@@ -707,14 +790,22 @@ async fn main(spawner: Spawner) {
     ).unwrap();
 
     // // --- AI ---
-    // // Get a default device for the backend
+    // // // Get a default device for the backend
     // let device = BackendDevice::default();
-
-    // // Create a new model and load the state
-    // let model: Model<Backend> = Model::default();
-
-    // let output = run_model(&model, &device, 1.0);
-
+    //
+    // // // Create a new model and load the state
+    // // let model: Model<Backend> = Model::default();
+    //
+    // // let output = run_model(&model, &device, 1.0);
+    // let recorder = CompactRecorder::new();
+    //
+    // let record_bytes = include_bytes!("model/tte.mpk");
+    //
+    // let record = recorder
+    //     .load(record_bytes.as_ref(), &device)
+    //     .expect("Failed to load recorder");
+    //
+    // let model: model::LstmNetwork<NdArray> = config.model.init(&device).load_record(record);
     // NOTE 
     // Creating multiple executor instances is supported, to run tasks with multiple priority levels. This allows higher-priority tasks to preempt lower-priority tasks.
 
@@ -726,17 +817,17 @@ async fn main(spawner: Spawner) {
     spawner.must_spawn(sbg_parser_task(tx));
     spawner.must_spawn(sbg_receiver_task());
     // spawner.must_spawn(baro_reader_task(baro));
-
+    spawner.must_spawn(ai_task());
     // pass control of the spawner to the state machine
     spawner.must_spawn(sm_task(spawner, state_machine));
 }
 
-fn run_model<'a>(model: &Model<NdArray>, device: &BackendDevice, input: f32) -> Tensor<Backend, 2> {
-    // Define the tensor
-    let input = Tensor::<Backend, 2>::from_floats([[input]], &device);
-
-    // Run the model on the input
-    let output = model.forward(input);
-
-    output
-}
+// fn run_model<'a>(model: &Model<NdArray>, device: &BackendDevice, input: f32) -> Tensor<Backend, 2> {
+//     // Define the tensor
+//     let input = Tensor::<Backend, 2>::from_floats([[input]], &device);
+//
+//     // Run the model on the input
+//     let output = model.forward(input);
+//
+//     output
+// }
