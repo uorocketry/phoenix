@@ -426,6 +426,7 @@
 
 #![no_std]
 
+use defmt::info;
 use embedded_hal_1::delay::DelayNs;
 use embedded_hal_1::digital::OutputPin;
 use embedded_hal_1::spi::SpiBus;
@@ -540,14 +541,14 @@ where
         cs.set_high().map_err(Error::Cs)?;
         
         // Perform hardware reset if the pin is provided
-        if let Some(ref mut reset_pin) = nreset {
-            reset_pin.set_high().map_err(Error::Reset)?;
-            delay.delay_ms(1);
-            reset_pin.set_low().map_err(Error::Reset)?;
-            delay.delay_ms(40); // Datasheet specifies >30ms
-            reset_pin.set_high().map_err(Error::Reset)?;
-            delay.delay_ms(100); // Wait for the device to boot up
-        }
+        // if let Some(ref mut reset_pin) = nreset {
+        //     reset_pin.set_high().map_err(Error::Reset)?;
+        //     delay.delay_ms(1);
+        //     reset_pin.set_low().map_err(Error::Reset)?;
+        //     delay.delay_ms(40); // Datasheet specifies >30ms
+        //     reset_pin.set_high().map_err(Error::Reset)?;
+        //     delay.delay_ms(100); // Wait for the device to boot up
+        // }
 
         let mut driver = Self { spi, cs, nreset, delay };
 
@@ -566,6 +567,9 @@ where
         // if who_am_i != 0x98 {
         //     return Err(Error::InvalidDeviceId);
         // }
+        info!("Verifying WHO_AM_I...");
+        let who_am_i = driver.read_reg(registers::WHO_AM_I)?;
+        info!("WHO_AM_I value: {=u8}", who_am_i);
 
         // Set default configurations
         driver.set_gyro_fsr(GyroFsr::Dps1966)?;
@@ -640,6 +644,7 @@ where
     pub fn read_gyro(&mut self) -> Result<[i16; 3], Error<SPIE, CSE, RESETE>> {
         let mut buf = [0u8; 6];
         self.read_regs(registers::GYRO_XOUT_H, &mut buf)?;
+        // info!("Read Gyro: {:?}", buf.clone());
         let x = i16::from_be_bytes([buf[0], buf[1]]);
         let y = i16::from_be_bytes([buf[2], buf[3]]);
         let z = i16::from_be_bytes([buf[4], buf[5]]);
