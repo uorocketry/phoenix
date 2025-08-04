@@ -622,23 +622,34 @@ async fn main(spawner: Spawner) {
 
     loop {
         Timer::after(Duration::from_millis(100)).await;
-        let data = imu.read_accel();
-        let data2 = imu.read_gyro();
+        let data = imu.read_all_converted(); 
+        match data {
+            Ok((accel, gyro)) => {
+                info!("Accel: x: {}, y: {}, z: {}", accel.x, accel.y, accel.z);
+                info!("Gyro: x: {}, y: {}, z: {}", gyro.x, gyro.y, gyro.z);
+            }
+            Err(e) => {
+            }
+        }
+
+
+        // let data = imu.read_accel_g();
+        // let data2 = imu.read_gyro_dps();
         // match data {
         //     Ok(accel) => {
-        //         info!("Accel: x: {}, y: {}, z: {}", accel[0], accel[1], accel[2]);
+        //         info!("Accel: x: {}, y: {}, z: {}", accel.x, accel.y, accel.z);
         //     }
         //     Err(e) => {
         //     }
         // }
 
-        match data2 {
-            Ok(gyro) => {
-                info!("Gyro: x: {}, y: {}, z: {}", gyro[0], gyro[1], gyro[2]);
-            }
-            Err(e) => {
-            }
-        }
+        // match data2 {
+        //     Ok(gyro) => {
+        //         info!("Gyro: x: {}, y: {}, z: {}", gyro.x, gyro.y, gyro.z);
+        //     }
+        //     Err(e) => {
+        //     }
+        // }
     }
 
     // --- SBG Setup ---
