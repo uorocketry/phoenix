@@ -1,4 +1,5 @@
 #![feature(impl_trait_in_assoc_type)]
+#![feature(ascii_char)]
 #![no_std]
 #![no_main]
 
@@ -9,6 +10,7 @@ mod music;
 mod model;
 mod imu;
 
+use ublox::{cfg_val::CfgVal::*, CfgLayerSet};
 use messages_prost::prost::Message;
 use embedded_hal_1::delay::DelayNs;
 use embedded_hal_1::digital::{OutputPin, PinState};
@@ -47,18 +49,21 @@ use heapless::{HistoryBuffer, Vec};
 use messages_prost::sensor::sbg::{SbgData, SbgMessage};
 use sbg_rs::sbg::SBG_BUFFER_SIZE;
 use static_cell::StaticCell;
-use ublox::{CfgPrtUartBuilder, DataBits, InProtoMask, OutProtoMask, Parity, StopBits, UartMode, UartPortId, UbxPacketRequest};
+use ublox::{CfgPrtUartBuilder, CfgValSetBuilder, DataBits, InProtoMask, OutProtoMask, Parity, StopBits, UartMode, UartPortId, UbxPacketRequest};
 use crate::traits::Context;
 use {defmt_rtt as _};
 use {panic_probe as _};
 use embedded_sdmmc::{Mode, SdCard, VolumeIdx, VolumeManager};
 use embedded_hal_bus::spi::RefCellDevice;
+use embedded_io_async::Read;
+use nmea::SentenceType;
 // Use a modern ms5611 driver that supports embedded-hal v1.0
 use common_arm::drivers::ms5611::{Ms5611, OversamplingRatio};
 
 // Use the asynchronous SpiDevice from embassy-embedded-hal
 
 use smlang::statemachine;
+use ublox::cfg_val::CfgVal;
 // use crate::model::sine::Model;
 // =================================================================================
 // Shared Resources & Types
@@ -617,12 +622,11 @@ async fn main(spawner: Spawner) {
     let imu_odr = Input::new(p.PC0, Pull::None);
     let imu_cs = Output::new(p.PB6, Level::High, Speed::Low);
     let imu_nreset = Output::new(p.PD4, Level::High, Speed::Low);
-    // let mut imu = imu::Iim20670::new(imu_spi, imu_cs, Some(imu_nreset), Delay).unwrap();
     let mut imu = imu::Iim20670::new(imu_spi, imu_cs, Some(imu_nreset), Delay).unwrap();
 
     loop {
         Timer::after(Duration::from_millis(100)).await;
-        let data = imu.read_all_converted(); 
+        let data = imu.read_all_converted();
         match data {
             Ok((accel, gyro)) => {
                 info!("Accel: x: {}, y: {}, z: {}", accel.x, accel.y, accel.z);
@@ -734,7 +738,7 @@ async fn main(spawner: Spawner) {
     let (mut gps_tx, mut gps_rx) = uart_gps.split();
     let mut ring_gps_rx = gps_rx.into_ring_buffered(unsafe { &mut RX_GPS_BUF });
     gps_reset.set_low();
-    Delay.delay_ms(300);
+    Delay.delay_ms(3000);
     gps_reset.set_high();
     gps_enable.set_low();
     let packet: [u8; 28] = CfgPrtUartBuilder {
@@ -750,12 +754,50 @@ async fn main(spawner: Spawner) {
     }
     .into_packet_bytes();
 
-    // gps_tx.write(&packet).await;
-    for i in 0..10 {
-        info!("Sending GPS packet: {:?}", &packet);
-        gps_tx.blocking_write(&packet);
-        Delay.delay_ms(100);
-    }
+    info!("Sending GPS packet: {:?}", &packet);
+    gps_tx.blocking_write(&packet).expect("TODO: panic message");
+
+    Delay.delay_ms(100);
+
+    let val_packet = CfgValSetBuilder {
+        version: 1,
+        layers: CfgLayerSet::RAM,
+        reserved1: 0,
+        cfg_data: &[Uart1OutProtUbx(true), Uart1InProtUbx(true)],
+    }.into_packet_vec();
+
+    info!("Packet val {}", val_packet.clone().as_slice());
+
+    gps_tx.blocking_write(val_packet.as_slice());
+
+    //
+    // let mut cfg_data = Vec::<CfgVal>::new();
+    //
+    // // Key to disable NMEA output on UART1. Set its value to 0 (false).
+    // cfg_data.push(CfgVal.::new(CfgKey::CFG_UART1OUTPROT_NMEA, 0));
+    //
+    // // Key to enable UBX output on UART1. Set its value to 1 (true).
+    // cfg_data.push(CfgVal::new(CfgKey::CFG_UART1OUTPROT_UBX, 1));
+    //
+    // // Optional: If you also want to set the baud rate permanently.
+    // // cfg_data.push(CfgVal::new(CfgKey::CFG_UART1_BAUDRATE, 9600));
+    //
+    //
+    // // 2. Build the CFG-VALSET packet.
+    // let packet = CfgValSetBuilder {
+    //     // Version must be 1 for key-value pair setting.
+    //     version: 1,
+    //
+    //     // This is the most important part. Specify the memory layers to save to.
+    //     // This makes the change permanent and survives a reboot.
+    //     // Using `all()` hits RAM, BBR, and Flash.
+    //     layers: CfgLayer::all(),
+    //
+    //     reserved1: 0,
+    //
+    //     // Pass the slice of key-value pairs.
+    //     cfg_data: &cfg_data,
+    // }.into_packet_vec();
 
     Delay.delay_ms(1000);
 
@@ -763,62 +805,85 @@ async fn main(spawner: Spawner) {
         UbxPacketRequest::request_for::<ublox::NavPosLlh>().into_packet_bytes();
         gps_tx.blocking_write(&request);
 
-    // loop {
-    //     let mut buf_data: [u8; GPS_BUFFER_SIZE] = [0; GPS_BUFFER_SIZE];
-    //     ring_gps_rx.read(&mut buf_data).await;
-    //     info!("GPS data read: {:?}", &buf_data[..]);
-    //     // if let Ok(len) = gps_rx.read(&mut buf_data).await {
-    //             // info!("read");
-    //     let request =
-    //         UbxPacketRequest::request_for::<ublox::NavPosLlh>().into_packet_bytes();
-    //     gps_tx.blocking_write(&request);
+    loop {
+        let request =
+            UbxPacketRequest::request_for::<ublox::NavPosLlh>().into_packet_bytes();
+        // gps_tx.blocking_write(&request);
+        // Delay.delay_ms(1000);
+        let mut buf_data: [u8; GPS_BUFFER_SIZE] = [0; GPS_BUFFER_SIZE];
+        ring_gps_rx.read_exact(&mut buf_data).await.unwrap();
+        // info!("GPS data read: {:?}", &buf_data[..]);
+        // if let Ok(len) = gps_rx.read(&mut buf_data).await {
+                // info!("read");
 
-    //             // Delay.delay_ms(1000);
-    //             // cortex_m::asm::delay(10_000);
-    //     let mut buf: [u8; GPS_BUFFER_SIZE] = [0; GPS_BUFFER_SIZE];
-    //     let bytes: [u8; GPS_BUFFER_SIZE] = [0; GPS_BUFFER_SIZE];
-    //     let buf: ublox::FixedLinearBuffer<'_> = ublox::FixedLinearBuffer::new(&mut buf[..]);
-    //     let mut parser = ublox::Parser::new(buf);
-    //     info!("GPS Parser initialized.");
-    //     let mut msgs = parser.consume(&buf_data);
-    //     info!("GPS Messages consumed. {}", msgs.next().is_some());
-    //     while let Some(msg) = msgs.next() {
-    //         match msg {
-    //             Ok(msg) => match msg {
-    //                 ublox::PacketRef::NavPosLlh(x) => {
-    //                     info!(
-    //                         "GPS latitude: {:?}, longitude {:?}",
-    //                         x.lat_degrees(),
-    //                         x.lon_degrees()
-    //                     );
-    //                 }
-    //                 ublox::PacketRef::NavStatus(x) => {
-    //                     info!("GPS fix stat: {:?}", x.fix_stat_raw());
-    //                 }
-    //                 ublox::PacketRef::NavDop(x) => {
-    //                     info!("GPS geometric drop: {:?}", x.geometric_dop());
-    //                 }
-    //                 ublox::PacketRef::NavSat(x) => {
-    //                     info!("GPS num sats used: {:?}", x.num_svs());
-    //                 }
-    //                 ublox::PacketRef::NavVelNed(x) => {
-    //                     info!("GPS velocity north: {:?}", x.vel_north());
-    //                 }
-    //                 ublox::PacketRef::NavPvt(x) => {
-    //                     info!("GPS nun sats PVT: {:?}", x.num_satellites());
-    //                 }
-    //                 _ => {
-    //                     info!("GPS Message not handled.");
-    //                 }
-    //             },
-    //             Err(e) => {
-    //                 info!("GPS parse Error");
-    //             }
-    //         }
-    //     }
-    //         // }
-    //     // }
-    // }
+                // Delay.delay_ms(1000);
+                // cortex_m::asm::delay(10_000);
+        let mut buf: [u8; GPS_BUFFER_SIZE] = [0; GPS_BUFFER_SIZE];
+        let bytes: [u8; GPS_BUFFER_SIZE] = [0; GPS_BUFFER_SIZE];
+
+        let mut nmea = nmea::Nmea::default();
+        let ascii_buf = unsafe {buf_data.as_ascii_unchecked()};
+        info!("BUFFER: {}", ascii_buf.as_str());
+        // if let Some(ascii_buf) = ascii_buf {
+            let res = nmea.parse(ascii_buf.as_str());
+
+            match res {
+                Ok(strings) => {
+                    info!("Result: {}", strings.as_str());
+                }
+                _ => {
+                    info!("nmea parser none found");
+                }
+            }
+        // } else {
+        //     info!("No valid sentence");
+        // }
+
+        // let buf: ublox::FixedLinearBuffer<'_> = ublox::FixedLinearBuffer::new(&mut buf[..]);
+        // let mut parser = ublox::Parser::new(buf);
+        // info!("GPS Parser initialized.");
+        // let mut msgs = parser.consume(&buf_data);
+        // info!("GPS Messages consumed. {}", msgs.next().is_some());
+        // while let Some(msg) = msgs.next() {
+        //     match msg {
+        //         Ok(msg) => match msg {
+        //             ublox::PacketRef::NavPosLlh(x) => {
+        //                 info!(
+        //                     "GPS latitude: {:?}, longitude {:?}",
+        //                     x.lat_degrees(),
+        //                     x.lon_degrees()
+        //                 );
+        //             }
+        //             ublox::PacketRef::NavStatus(x) => {
+        //                 info!("GPS fix stat: {:?}", x.fix_stat_raw());
+        //             }
+        //             ublox::PacketRef::NavDop(x) => {
+        //                 info!("GPS geometric drop: {:?}", x.geometric_dop());
+        //             }
+        //             ublox::PacketRef::NavSat(x) => {
+        //                 info!("GPS num sats used: {:?}", x.num_svs());
+        //             }
+        //             ublox::PacketRef::NavVelNed(x) => {
+        //                 info!("GPS velocity north: {:?}", x.vel_north());
+        //             }
+        //             ublox::PacketRef::NavPvt(x) => {
+        //                 info!("GPS nun sats PVT: {:?}", x.num_satellites());
+        //             }
+        //             _ => {
+        //                 info!("GPS Message not handled.");
+        //             }
+        //         },
+        //         Err(e) => {
+        //             info!("GPS parse Error");
+        //         }
+        //     }
+        // }
+        //
+        //
+
+            // }
+        // }
+    }
 
     // // --- Boom Boom Setup --- 
     // /*

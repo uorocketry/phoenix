@@ -2833,7 +2833,7 @@ dependencies = [
  "prost",
  "prost-build",
  "serde",
- "ublox 0.4.5 (git+https://github.com/uorocketry/ublox)",
+ "ublox 0.4.5",
 ]
 
 [[package]]
@@ -2856,6 +2856,12 @@ name = "micromath"
 version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3c8dda44ff03a2f238717214da50f65d5a53b45cd213a7370424ffdb6fae815"
+
+[[package]]
+name = "minimal-lexical"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "68354c5c6bd36d73ff3feceb05efa59b6acb7626617f4962be322a825e61f79a"
 
 [[package]]
 name = "miniz_oxide"
@@ -2941,6 +2947,30 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8c196769dd60fd4f363e11d948139556a344e79d451aeb2fa2fd040738ef7691"
 dependencies = [
  "jni-sys",
+]
+
+[[package]]
+name = "nmea"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2086c773d18da556c05ca235596d163c00379027189bafe2209ae40ebd19717c"
+dependencies = [
+ "arrayvec",
+ "cfg-if",
+ "chrono 0.4.41",
+ "heapless 0.8.0",
+ "nom",
+ "num-traits",
+]
+
+[[package]]
+name = "nom"
+version = "7.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d273983c5a657a70a3e8f2a01329822f3b8c8172b73826411a55751e404a0a4a"
+dependencies = [
+ "memchr",
+ "minimal-lexical",
 ]
 
 [[package]]
@@ -3215,12 +3245,13 @@ dependencies = [
  "madgwick",
  "messages-prost",
  "micromath",
+ "nmea",
  "panic-probe",
  "sbg-rs",
  "smlang",
  "static_cell",
  "stm32-fmc",
- "ublox 0.4.5 (registry+https://github.com/rust-lang/crates.io-index)",
+ "ublox 0.6.0",
 ]
 
 [[package]]
@@ -4547,19 +4578,6 @@ checksum = "1dccffe3ce07af9386bfd29e80c0ab1a8205a2fc34e4bcd40364df902cfa8f3f"
 [[package]]
 name = "ublox"
 version = "0.4.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ad0c3df1bc466bd97f94ab437aab9116d5c15909c8a5cb9905ee3c11df998e8"
-dependencies = [
- "bitflags 2.9.1",
- "chrono 0.4.41",
- "num-traits",
- "serde",
- "ublox_derive 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
-]
-
-[[package]]
-name = "ublox"
-version = "0.4.5"
 source = "git+https://github.com/uorocketry/ublox#286d43a3ae9a3ba30a04be04c65bf89aca6b1bfe"
 dependencies = [
  "bitflags 2.9.1",
@@ -4567,14 +4585,26 @@ dependencies = [
  "defmt 0.3.100",
  "num-traits",
  "serde",
- "ublox_derive 0.1.0 (git+https://github.com/uorocketry/ublox)",
+ "ublox_derive 0.1.0",
+]
+
+[[package]]
+name = "ublox"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0456d0c38f15a56f5a12af23efe86719b757744ededebd69eee3320ed24ad50f"
+dependencies = [
+ "bitflags 2.9.1",
+ "chrono 0.4.41",
+ "num-traits",
+ "serde",
+ "ublox_derive 0.3.0",
 ]
 
 [[package]]
 name = "ublox_derive"
 version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dea60f23c86d2329b7162f6ebb82854bc77b992a9984e1fdfe8707f88e0e3e69"
+source = "git+https://github.com/uorocketry/ublox#286d43a3ae9a3ba30a04be04c65bf89aca6b1bfe"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4583,8 +4613,9 @@ dependencies = [
 
 [[package]]
 name = "ublox_derive"
-version = "0.1.0"
-source = "git+https://github.com/uorocketry/ublox#286d43a3ae9a3ba30a04be04c65bf89aca6b1bfe"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "290ba2a4bfe92acb91bb9c0cdae32e9a1cda9cfe5b3329eaf9a444c522512de9"
 dependencies = [
  "proc-macro2",
  "quote",
