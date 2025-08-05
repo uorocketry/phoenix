@@ -90,6 +90,22 @@ mod app {
                 stm32h7xx_hal::timer::Timer<stm32h7xx_hal::pac::TIM2>,
             >,
         >,
+        // IMU uses SPI5 with pins:
+        // PF_06 for CS
+        // PF_07 for SCK
+        // PF_08 for MISO
+        // PF_09 for MOSI
+        imu: common_arm::drivers::iim20670::Iim20670<
+            stm32h7xx_hal::spi::Spi<stm32h7xx_hal::pac::SPI5, stm32h7xx_hal::spi::Enabled>,
+            stm32h7xx_hal::gpio::Pin<
+                'F',
+                6,
+                stm32h7xx_hal::gpio::Output<stm32h7xx_hal::gpio::PushPull>,
+            >,
+            stm32h7xx_hal::delay::DelayFromCountDownTimer<
+                stm32h7xx_hal::timer::Timer<stm32h7xx_hal::pac::TIM3>,
+            >,
+        >,
     }
 
     #[init]
@@ -300,6 +316,32 @@ mod app {
 
         let baro = common_arm::drivers::ms5611::Ms5611::new(spi4, baro_cs, delay_tim).unwrap();
 
+        // Configure SPI5 for IMU
+        let gpiof = ctx.device.GPIOF.split(ccdr.peripheral.GPIOF);
+        let spi5 = ctx.device.SPI5.spi(
+            (
+                gpiof.pf7.into_alternate(), // SCK
+                gpiof.pf8.into_alternate(), // MISO
+                gpiof.pf9.into_alternate(), // MOSI
+            ),
+            stm32h7xx_hal::spi::Config::new(stm32h7xx_hal::spi::MODE_0), // IIM20670 uses SPI Mode 0
+            10.MHz(), // IIM20670 supports up to 10MHz
+            ccdr.peripheral.SPI5,
+            &ccdr.clocks,
+        );
+        let imu_cs = gpiof.pf6.into_push_pull_output(); // CS pin
+        let timer3 = ctx
+            .device
+            .TIM3
+            .timer(1.MHz(), ccdr.peripheral.TIM3, &ccdr.clocks);
+        let delay_tim3 = stm32h7xx_hal::delay::DelayFromCountDownTimer::new(timer3);
+
+        // Initialize IMU with validation
+        let imu = common_arm::drivers::iim20670::Iim20670::new(spi5, imu_cs, delay_tim3)
+            .expect("Failed to initialize IMU");
+
+        info!("IMU initialized successfully");
+
         // UART for sbg
         let tx: Pin<'D', 1, Alternate<8>> = gpiod.pd1.into_alternate();
         let rx: Pin<'D', 0, Alternate<8>> = gpiod.pd0.into_alternate();
@@ -341,6 +383,7 @@ mod app {
         reset_reason_send::spawn().ok();
         state_send::spawn().ok();
         baro_read::spawn().ok();
+        imu_read::spawn().ok(); // NEW: Spawn IMU reading task
         // generate_random_messages::spawn().ok();
         // sensor_send::spawn().ok();
         info!("Online");
@@ -362,8 +405,52 @@ mod app {
                 led_green,
                 buzzer: c0,
                 baro,
+                imu, // NEW: Add IMU to local resources
             },
         )
+    }
+
+    #[task(priority = 3, local = [imu], shared = [&em, data_manager, madgwick_service])]
+    async fn imu_read(mut cx: imu_read::Context) {
+        let imu = cx.local.imu;
+        loop {
+            cx.shared.em.run(|| {
+                match imu.read_imu_data() {
+                    Ok(imu_data) => {
+                        let gyro = [imu_data.gyro_x, imu_data.gyro_y, imu_data.gyro_z];
+                        let accel = [imu_data.accel_x, imu_data.accel_y, imu_data.accel_z];
+                        
+                        // Store raw IMU data and process through Madgwick in one efficient operation
+                        cx.shared.data_manager.lock(|dm| {
+                            // Store raw sensor data (simplified like barometer)
+                            dm.imu_gyro = Some(gyro);
+                            dm.imu_accel = Some(accel);
+                            dm.imu_temperature = Some(imu_data.temp);
+                            
+                            // Process through Madgwick and store result directly
+                            cx.shared.madgwick_service.lock(|madgwick| {
+                                let quaternion = madgwick.process_raw_imu_data(gyro, accel);
+                                dm.imu_quaternion = Some(quaternion);
+                            });
+                        });
+                        info!("IMU: gyro=({}, {}, {}) accel=({}, {}, {}) temp={}°C",
+                              gyro[0], gyro[1], gyro[2],
+                              accel[0], accel[1], accel[2],
+                              imu_data.temp);
+                        Ok(())
+                    }
+                    Err(e) => {
+                        info!("IMU: Reading failed!");
+                        // Clear IMU data on error (simplified like barometer)
+                        cx.shared.data_manager.lock(|dm| {
+                            dm.clear_imu_data();
+                        });
+                        Err(HydraError::from(e))
+                    }
+                }
+            });
+            Mono::delay(10.millis()).await; // 100Hz sampling rate
+        }
     }
 
     // it would be nice to have RTIC be able to return objects, but the current procedural macro
@@ -374,7 +461,7 @@ mod app {
         loop {
             cx.shared.em.run(|| {
                 // Choose the desired Oversampling Ratio for this reading
-                let osr = OversamplingRatio::Osr512; // Example: Highest precision
+                let osr = OversamplingRatio::Osr512; // Example: High precision
 
                 match baro.read_pressure_temperature(osr) {
                     Ok((temp_c, press_kpa)) => {
@@ -580,7 +667,7 @@ mod app {
     fn can_data(mut cx: can_data::Context) {
         cx.shared.can_data_manager.lock(|can| {
             while let Ok(Some(message)) = can.receive_message() {
-                // process IMU data through madgwick service
+                // process IMU data through madgwick service (for CAN-received messages)
                 cx.shared.madgwick_service.lock(|madgwick| {
                     if let Some(result) = madgwick.process_imu_data(&message) {
                         cx.shared.data_manager.lock(|dm| {
