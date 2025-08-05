@@ -23,7 +23,7 @@ panic-probe = { workspace = true }
 chrono = { workspace = true }
 messages = { workspace = true }
 madgwick = { workspace = true }
-m = "0.1.0"
+m = { workspace = true }
 
 [dev-dependencies]
 defmt-test = { workspace = true }

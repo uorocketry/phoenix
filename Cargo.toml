@@ -75,3 +75,6 @@ version = "0.3.2"
 
 [workspace.dependencies.madgwick]
 version = "0.1.1"
+
+[workspace.dependencies.m]
+version = "0.1.0"
