@@ -337,7 +337,7 @@ mod app {
         let delay_tim3 = stm32h7xx_hal::delay::DelayFromCountDownTimer::new(timer3);
 
         // Initialize IMU with validation
-        let imu = common_arm::drivers::iim20670::Iim20670::new_with_validation(spi5, imu_cs, delay_tim3)
+        let imu = common_arm::drivers::iim20670::Iim20670::new(spi5, imu_cs, delay_tim3)
             .expect("Failed to initialize IMU");
 
         info!("IMU initialized successfully");

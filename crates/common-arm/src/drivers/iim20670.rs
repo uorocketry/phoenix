@@ -251,8 +251,8 @@ where
     CS: OutputPin<Error = CSE>,
     DELAY: DelayUs<u32>,
 {
-    /// Create driver and initialize with default configuration
-    pub fn new(spi: SPI, mut cs: CS, mut delay: DELAY) -> Result<Self, Error<SPIE, CSE>> {
+    /// Create driver and initialize with standard/default settings 
+    pub fn default(spi: SPI, mut cs: CS, mut delay: DELAY) -> Result<Self, Error<SPIE, CSE>> {
         cs.set_high().map_err(Error::Cs)?;
         delay.delay_us(10_000);
         
@@ -271,7 +271,7 @@ where
     }
 
     /// Create driver with validation checks
-    pub fn new_with_validation(spi: SPI, mut cs: CS, mut delay: DELAY) -> Result<Self, Error<SPIE, CSE>> {
+    pub fn new(spi: SPI, mut cs: CS, mut delay: DELAY) -> Result<Self, Error<SPIE, CSE>> {
         cs.set_high().map_err(Error::Cs)?;
         delay.delay_us(10_000);
         
@@ -633,31 +633,34 @@ where
         Ok((gx, gy, gz, ax, ay, az, temp))
     }
 
-    /// Data conversion functions (Section 4)
-    fn convert_gyro(&self, raw: i16) -> f32 { 
+    /// Data scaling/normalization functions (Section 4) - converts raw ADC values into measurable units
+    /// Scales raw gyroscope counts to degrees per second
+    fn scale_gyro(&self, raw: i16) -> f32 { 
         raw as f32 / self.gyro_scale.get_sensitivity() 
     }
     
-    fn convert_accel(&self, raw: i16) -> f32 { 
+    /// Scales raw accelerometer data counts to g-force
+    fn scale_accel(&self, raw: i16) -> f32 { 
         raw as f32 / self.accel_scale.get_sensitivity() 
     }
     
-    fn convert_temp(&self, raw: i16) -> f32 { 
+    /// Converts raw temperature to Celsius
+    fn raw_temp_to_celsius(&self, raw: i16) -> f32 { 
         25.0 + (raw as f32 / 20.0) 
     }
 
-    /// Read all sensor data in engineering units
+    /// Read all sensor data in measurable units
     pub fn read_imu_data(&mut self) -> Result<ImuData, Error<SPIE, CSE>> {
         let (gx, gy, gz, ax, ay, az, temp) = self.read_raw_all()?;
         
         Ok(ImuData { 
-            gyro_x: self.convert_gyro(gx), 
-            gyro_y: self.convert_gyro(gy), 
-            gyro_z: self.convert_gyro(gz), 
-            accel_x: self.convert_accel(ax), 
-            accel_y: self.convert_accel(ay), 
-            accel_z: self.convert_accel(az), 
-            temp: self.convert_temp(temp),
+            gyro_x: self.scale_gyro(gx), 
+            gyro_y: self.scale_gyro(gy), 
+            gyro_z: self.scale_gyro(gz), 
+            accel_x: self.scale_accel(ax), 
+            accel_y: self.scale_accel(ay), 
+            accel_z: self.scale_accel(az), 
+            temp: self.raw_temp_to_celsius(temp),
         })
     }
 
@@ -665,9 +668,9 @@ where
     pub fn read_gyro(&mut self) -> Result<(f32, f32, f32), Error<SPIE, CSE>> { 
         let (gx, gy, gz, _, _, _, _) = self.read_raw_all()?; 
         Ok((
-            self.convert_gyro(gx),
-            self.convert_gyro(gy),
-            self.convert_gyro(gz)
+            self.scale_gyro(gx),
+            self.scale_gyro(gy),
+            self.scale_gyro(gz)
         )) 
     }
     
@@ -675,22 +678,22 @@ where
     pub fn read_accel(&mut self) -> Result<(f32, f32, f32), Error<SPIE, CSE>> { 
         let (_, _, _, ax, ay, az, _) = self.read_raw_all()?; 
         Ok((
-            self.convert_accel(ax),
-            self.convert_accel(ay),
-            self.convert_accel(az)
+            self.scale_accel(ax),
+            self.scale_accel(ay),
+            self.scale_accel(az)
         )) 
     }
     
     /// Read temperature sensor 1
     pub fn read_temp(&mut self) -> Result<f32, Error<SPIE, CSE>> { 
         let (_, _, _, _, _, _, temp) = self.read_raw_all()?; 
-        Ok(self.convert_temp(temp)) 
+        Ok(self.raw_temp_to_celsius(temp)) 
     }
     
     /// Read temperature sensor 2
     pub fn read_temp2(&mut self) -> Result<f32, Error<SPIE, CSE>> { 
         let temp2 = self.read_raw_temp2()?; 
-        Ok(self.convert_temp(temp2)) 
+        Ok(self.raw_temp_to_celsius(temp2)) 
     }
     
     /// Read temperature difference between sensors
