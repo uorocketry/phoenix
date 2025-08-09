@@ -649,7 +649,7 @@ async fn radio_reader_task(mut rx: RingBufferedUartRx<'static>) {
                 }
             }
         }
-        Timer::after(Duration::from_millis(100)).await;
+        // Timer::after(Duration::from_millis(100)).await;
     }
 }
 
@@ -885,6 +885,7 @@ async fn main(spawner: Spawner) {
     Delay.delay_ms(3000);
     gps_reset.set_high();
     gps_enable.set_low();
+    Delay.delay_ms(1000);
     let packet: [u8; 28] = CfgPrtUartBuilder {
         portid: UartPortId::Uart1,
         reserved0: 0,
@@ -899,20 +900,20 @@ async fn main(spawner: Spawner) {
     .into_packet_bytes();
 
     info!("Sending GPS packet: {:?}", &packet);
-    gps_tx.blocking_write(&packet).expect("TODO: panic message");
+    gps_tx.write(&packet).await.expect("TODO: panic message");
 
     Delay.delay_ms(100);
 
-    // let val_packet = CfgValSetBuilder {
-    //     version: 1,
-    //     layers: CfgLayer::RAM,
-    //     reserved1: 0,
-    //     cfg_data: &[Uart1OutProtUbx(true), Uart1InProtUbx(true)],
-    // }.into_packet_vec();
+    let val_packet = CfgValSetBuilder {
+        version: 1,
+        layers: CfgLayer::RAM,
+        reserved1: 0,
+        cfg_data: &[Uart1OutProtUbx(true), Uart1InProtUbx(true)],
+    }.into_packet_vec();
 
-    // info!("Packet val {}", val_packet.clone().as_slice());
+    info!("Packet val {}", val_packet.clone().as_slice());
 
-    // gps_tx.blocking_write(val_packet.as_slice());
+    gps_tx.write(val_packet.as_slice()).await.expect("TODO: panic message");
 
     Delay.delay_ms(1000);
 
@@ -926,7 +927,7 @@ async fn main(spawner: Spawner) {
     //     gps_tx.blocking_write(&request);
     //     // Delay.delay_ms(1000);
     //     let mut buf_data: [u8; GPS_BUFFER_SIZE] = [0; GPS_BUFFER_SIZE];
-    //     ring_gps_rx.read(&mut buf_data).await.unwrap();
+    //     ring_gps_rx.read(&mut buf_data).await;
     //     info!("GPS data read: {:?}", &buf_data[..]);
     //     // if let Ok(len) = gps_rx.read(&mut buf_data).await {
     //             // info!("read");
@@ -936,20 +937,20 @@ async fn main(spawner: Spawner) {
     //     let mut buf: [u8; GPS_BUFFER_SIZE] = [0; GPS_BUFFER_SIZE];
     //     let bytes: [u8; GPS_BUFFER_SIZE] = [0; GPS_BUFFER_SIZE];
 
-    //     // let mut nmea = nmea::Nmea::default();
-    //     // let ascii_buf = unsafe {buf_data.as_ascii_unchecked()};
-    //     // info!("BUFFER: {}", ascii_buf.as_str());
-    //     // // if let Some(ascii_buf) = ascii_buf {
-    //     //     let res = nmea.parse(ascii_buf.as_str());
+    //     let mut nmea = nmea::Nmea::default();
+    //     let ascii_buf = unsafe {buf_data.as_ascii_unchecked()};
+    //     info!("BUFFER: {}", ascii_buf.as_str());
+    //     // if let Some(ascii_buf) = ascii_buf {
+    //         let res = nmea.parse(ascii_buf.as_str());
 
-    //     //     match res {
-    //     //         Ok(strings) => {
-    //     //             info!("Result: {}", strings.as_str());
-    //     //         }
-    //     //         _ => {
-    //     //             info!("nmea parser none found");
-    //     //         }
-    //     //     }
+    //         match res {
+    //             Ok(strings) => {
+    //                 info!("Result: {}", strings.as_str());
+    //             }
+    //             _ => {
+    //                 info!("nmea parser none found");
+    //             }
+    //         }
 
 
     //     // } else {
@@ -960,7 +961,7 @@ async fn main(spawner: Spawner) {
     //     let mut parser = ublox::Parser::new(buf);
     //     // info!("GPS Parser initialized.");
     //     let mut msgs = parser.consume(&buf_data);
-    //     // info!("GPS Messages consumed. {}", msgs.next().is_some());
+    //     info!("GPS Messages consumed. {}", msgs.next().is_some());
     //     while let Some(msg) = msgs.next() {
     //         match msg {
     //             Ok(msg) => match msg {
