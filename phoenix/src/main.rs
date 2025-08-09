@@ -10,7 +10,8 @@ mod music;
 mod model;
 mod imu;
 
-use ublox::{cfg_val::CfgVal::*, CfgLayerSet};
+use messages_prost::radio::radio_frame::Payload;
+use ublox::{cfg_val::CfgVal::*, CfgLayer};
 use messages_prost::prost::Message;
 use embedded_hal_1::delay::DelayNs;
 use embedded_hal_1::digital::{OutputPin, PinState};
@@ -64,6 +65,27 @@ use common_arm::drivers::ms5611::{Ms5611, OversamplingRatio};
 
 use smlang::statemachine;
 use ublox::cfg_val::CfgVal;
+
+struct Arming {
+    main: Output<'static>,
+    drogue: Output<'static>,
+    main_b: Output<'static>,
+    drogue_b: Output<'static>,
+}
+
+struct Fire {
+    main: Output<'static>,
+    drogue: Output<'static>,
+    main_b: Output<'static>,
+    drogue_b: Output<'static>,
+}
+
+struct RecoveryManager {
+    arming: Arming,
+    fire: Fire, 
+}
+
+
 // use crate::model::sine::Model;
 // =================================================================================
 // Shared Resources & Types
@@ -74,7 +96,9 @@ type BackendDevice = <Backend as burn::tensor::backend::Backend>::Device;
 
 type DmaBuffer = [u8; SBG_BUFFER_SIZE];
 
-const GPS_BUFFER_SIZE: usize = 256;
+const GPS_BUFFER_SIZE: usize = 26;
+
+const RADIO_BUFFER_SIZE: usize = 255;
 
 
 #[global_allocator]
@@ -85,10 +109,15 @@ static PRESSURE_SIGNAL: Signal<CriticalSectionRawMutex, (f32, u8, Instant)> = Si
 static SBG_CHANNEL: Channel<CriticalSectionRawMutex, SbgData, 10> = Channel::new();
 static BUFFER_CHANNEL: Channel<CriticalSectionRawMutex, DmaBuffer, 10> = Channel::new();
 static EVENT_CHANNEL: Channel<CriticalSectionRawMutex, Events, 2> = Channel::new();
+
+static COMMAND_CHANNEL: Channel<CriticalSectionRawMutex, messages_prost::command::command::Data, 2> = Channel::new();
 // static FAULT_CHANNEL: Channel<CriticalSectionRawMutex, , 2> = Channel::new();
 static RADIO_CHANNEL: Channel<CriticalSectionRawMutex, [u8; 255], 10> = Channel::new();
 #[link_section = ".axisram.buffers"]
 static mut RX_SBG_BUF: [u8; SBG_BUFFER_SIZE] = [0; SBG_BUFFER_SIZE];
+
+#[link_section = ".axisram.buffers"]
+static mut RX_RADIO_BUF: [u8; SBG_BUFFER_SIZE] = [0; SBG_BUFFER_SIZE];
 
 #[link_section = ".axisram.buffers"]
 static mut RX_GPS_BUF: [u8; GPS_BUFFER_SIZE] = [0; GPS_BUFFER_SIZE];
@@ -97,6 +126,9 @@ static SPI_BUS: StaticCell<embassy_sync::mutex::Mutex<CriticalSectionRawMutex, S
 
 // Static variable for the RTC
 pub static RTC: Mutex<CriticalSectionRawMutex, RefCell<Option<Rtc>>> =
+    Mutex::new(RefCell::new(None));
+
+pub static RECOVERY_MANAGER: Mutex<CriticalSectionRawMutex, RefCell<Option<RecoveryManager>>> =
     Mutex::new(RefCell::new(None));
 
 bind_interrupts!(struct Irqs {
@@ -329,41 +361,54 @@ async fn sbg_receiver_task() {
         match data.data {
             Some(x) => {
                 let mut buf: [u8; 255] = [0; 255];
+                let msg = messages_prost::radio::RadioFrame {
+                    node: messages_prost::common::Node::Phoenix.into(), 
+                    payload: Some(messages_prost::radio::radio_frame::Payload::Sbg(data))
+                };
+                msg.encode_length_delimited(&mut buf.as_mut())
+                    .expect("Failed to encode SBG GPS Position");
+                RADIO_CHANNEL.send(buf).await;
 
-                match x {
-                    messages_prost::sensor::sbg::sbg_data::Data::GpsPos(gps_pos) => {
-                        let msg: SbgMessage = SbgMessage {
-                            node: 0,
-                            data: Some(data),
-                        };
-                        msg.encode_length_delimited(&mut buf.as_mut())
-                            .expect("Failed to encode SBG GPS Position");
-                        RADIO_CHANNEL.send(buf).await;
-                        // info!("Received SBG GPS Position: {:?}", gps_pos);
-                    },
-                    messages_prost::sensor::sbg::sbg_data::Data::UtcTime(utc_time) => {
-                        // info!("Received SBG UTC Time: {:?}", utc_time.time_stamp);
-                    },
-                    messages_prost::sensor::sbg::sbg_data::Data::Imu(imu) => {
-                        // info!("Received SBG IMU data: {:?}", imu.time_stamp);
-                    },
-                    messages_prost::sensor::sbg::sbg_data::Data::EkfQuat(ekf_quat) => {
-                        // info!("Received SBG EKF Quaternion: {:?}", ekf_quat.time_stamp);
-                    },
-                    messages_prost::sensor::sbg::sbg_data::Data::EkfNav(ekf_nav) => {
-                        // info!("Received SBG EKF Navigation: {:?}", ekf_nav.time_stamp);
-                    },
-                    messages_prost::sensor::sbg::sbg_data::Data::GpsVel(gps_vel) => {
-                        // info!("Received SBG GPS Velocity: {:?}", gps_vel.time_stamp);
-                    },
-                    messages_prost::sensor::sbg::sbg_data::Data::Air(air) => {
-                        if let Some(air_data) = air.data {
-                            info!("Air data: Pressure: {}, Altitude: {}, Temperature: {}", air_data.pressure_abs, air_data.altitude, air_data.air_temperature);
-                        } else {
-                            info!("Received SBG Air Data with no data field.");
-                        }
-                    },
-                }
+                // match x {
+                    // messages_prost::sensor::sbg::sbg_data::Data:: => {
+
+                    // }
+                    // messages_prost::sensor::sbg::sbg_data::Data::GpsPos(gps_pos) => {
+                    //     let msg: SbgMessage = SbgMessage {
+                    //         node: 0,
+                    //         data: Some(data),
+                    //     };
+                    //     msg.encode_length_delimited(&mut buf.as_mut())
+                    //         .expect("Failed to encode SBG GPS Position");
+                    //     RADIO_CHANNEL.send(buf).await;
+                    //     // info!("Received SBG GPS Position: {:?}", gps_pos);
+                    // },
+                    // messages_prost::sensor::sbg::sbg_data::Data::UtcTime(utc_time) => {
+                    //     // info!("Received SBG UTC Time: {:?}", utc_time.time_stamp);
+                    // },
+                    // messages_prost::sensor::sbg::sbg_data::Data::Imu(imu) => {
+                    //     // info!("Received SBG IMU data: {:?}", imu.time_stamp);
+                    // },
+                    // messages_prost::sensor::sbg::sbg_data::Data::EkfQuat(ekf_quat) => {
+                    //     // info!("Received SBG EKF Quaternion: {:?}", ekf_quat.time_stamp);
+                    // },
+                    // messages_prost::sensor::sbg::sbg_data::Data::EkfNav(ekf_nav) => {
+                    //     // info!("Received SBG EKF Navigation: {:?}", ekf_nav.time_stamp);
+                    // },
+                    // messages_prost::sensor::sbg::sbg_data::Data::GpsVel(gps_vel) => {
+                    //     // info!("Received SBG GPS Velocity: {:?}", gps_vel.time_stamp);
+                    // },
+                    // messages_prost::sensor::sbg::sbg_data::Data::Air(air) => {
+                    //     let msg: SbgMessage = SbgMessage {
+                    //         node: 0,
+                    //         data: Some(data),
+                    //     };
+                    //     msg.encode_length_delimited(&mut buf.as_mut())
+                    //         .expect("Failed to encode SBG GPS Position");
+                    //     RADIO_CHANNEL.send(buf).await;
+                    //     info!("air data send");
+                    // },
+                // }
             },
             None => {
                 info!("No SBG data received");
@@ -455,7 +500,7 @@ async fn baro_reader_task(mut baro: Ms5611<Spi<'static, Blocking>, Output<'stati
 #[embassy_executor::task]
 async fn radio_reader_task(mut rx: RingBufferedUartRx<'static>) {
     loop {
-        let mut buf: [u8; 256] = [0; 256];
+        let mut buf: [u8; RADIO_BUFFER_SIZE] = [0; RADIO_BUFFER_SIZE];
         if let Ok(len) = rx.read(&mut buf).await {
             if len > 0 {
                 // Process the received data
@@ -465,14 +510,140 @@ async fn radio_reader_task(mut rx: RingBufferedUartRx<'static>) {
 
                 match msg {
                     mavlink::uorocketry::MavMessage::POSTCARD_MESSAGE(msg) => {
+                        info!("Received postcard message");
                         // decode the msg
-                        
+                        if let Ok(recv) = messages_prost::radio::RadioFrame::decode_length_delimited(
+                            &mut &msg.message[..],
+                        ) {
+                            // info!("Received radio frame: {:?}", recv.node);
+                            if let Some(payload) = recv.payload {
+                                match payload {
+                                    Payload::Sbg(sbg_data) => {
+                                        info!("Received SBG data: {:?}", sbg_data.data.is_some());
+                                    }
+                                    Payload::Gps(gps_data) => {
+                                        info!("Received GPS data: {:?}", gps_data.data.len());
+                                        // Handle GPS data
+                                    }
+                                    Payload::Madgwick(madgwick_data) => {
+                                        info!("Received Madgwick data: {:?}", madgwick_data.data.is_some());
+                                        // Handle Madgwick data
+                                    }
+                                    Payload::Iim20670(imu_data) => {
+                                        info!("Received IMU data: {:?}", imu_data.data.is_some());
+                                        // Handle IMU data
+                                    }
+                                    Payload::Log(log_data) => {
+                                        info!("Received Log data: {:?}", log_data.level );
+                                        // Handle Log data
+                                    }
+                                    Payload::State(state_message) => {
+                                        info!("Received State message: {:?}", state_message.state);
+                                        // Handle State message
+                                    }
+                                    Payload::Command(command) => {
+                                        info!("Received Command: {:?}", command.data.is_some());
+                                        if let Some(command_data) = command.data {
+                                            match command_data {
+                                                messages_prost::command::command::Data::Ping(ping) => {
+                                                    // info!("Received Ping command: {:?}", ping);
+                                                    info!("Ping");
+                                                    let mut buf: [u8; 255] = [0; 255];
+                                                    let msg = messages_prost::radio::RadioFrame {
+                                                        node: messages_prost::common::Node::Phoenix.into(), 
+                                                        payload: Some(messages_prost::radio::radio_frame::Payload::Command(
+                                                            messages_prost::command::Command {
+                                                                node: 0,
+                                                                data: Some(messages_prost::command::command::Data::Pong(
+                                                                    messages_prost::command::Pong {
+                                                                        id: ping.id,
+                                                                    }
+                                                                )),
+                                                            }
+                                                        ))
+                                                    };
+                                                    msg.encode_length_delimited(&mut buf.as_mut())
+                                                        .expect("Failed to encode SBG GPS Position");
+                                                    RADIO_CHANNEL.send(buf).await; 
+                                                }
+                                                messages_prost::command::command::Data::Pong(pong) => {
+                                                    // info!("Received Pong command: {:?}", pong);
+                                                    info!("Pong");
+                                                }
+                                                messages_prost::command::command::Data::Online(online) => {
+                                                    // info!("Received Online command: {:?}", online);
+                                                }
+                                                messages_prost::command::command::Data::DeployDrogue(deploy_drogue) => {
+                                                    RECOVERY_MANAGER.lock(|cell| {
+                                                        // *cell.borrow_mut() = Some(recovery_manager);
+                                                        if let Some(recovery_manager) = cell.borrow_mut().as_mut() {
+                                                            recovery_manager.arming.drogue.set_high();
+                                                            recovery_manager.arming.drogue_b.set_high();
+                                                            recovery_manager.fire.drogue.set_high();
+                                                            recovery_manager.fire.drogue_b.set_high();
+                                                            Delay.delay_ms(500);
+                                                            
+                                                            recovery_manager.fire.drogue.set_low();
+                                                            recovery_manager.fire.drogue_b.set_low();
+                                                            recovery_manager.arming.drogue.set_low();
+                                                            recovery_manager.arming.drogue_b.set_low();
+                                                        } else {
+                                                            info!("Recovery manager not initialized.");
+                                                        }
+                                                    });
+                                                    
+                                                    // COMMAND_CHANNEL.send(command_data).await; 
+                                                    // info!("Received Deploy Drogue command: {:?}", deploy_drogue);
+                                                }
+                                                messages_prost::command::command::Data::DeployMain(deploy_main) => {
+                                                    RECOVERY_MANAGER.lock(|cell| {
+                                                        info!("Boom boom");
+                                                        // *cell.borrow_mut() = Some(recovery_manager);
+                                                        if let Some(recovery_manager) = cell.borrow_mut().as_mut() {
+                                                            recovery_manager.arming.main.set_high();
+                                                            recovery_manager.arming.main_b.set_high();
+                                                            recovery_manager.fire.main.set_high();
+                                                            recovery_manager.fire.main_b.set_high();
+                                                            Delay.delay_ms(500);
+
+                                                            recovery_manager.fire.main.set_low();
+                                                            recovery_manager.fire.main_b.set_low();
+                                                            recovery_manager.arming.main.set_low();
+                                                            recovery_manager.arming.main_b.set_low();
+                                                        } else {
+                                                            info!("Recovery manager not initialized.");
+                                                        }
+                                                    });
+                                                    // info!("Received Deploy Main command: {:?}", deploy_main);
+                                                    // COMMAND_CHANNEL.send(command_data).await; 
+
+                                                }
+                                                messages_prost::command::command::Data::PowerDown(power_down) => {
+                                                    // info!("Received Power Down command: {:?}", power_down);
+                                                }
+                                                messages_prost::command::command::Data::RadioRateChange(rate_change) => {
+                                                    // info!("Received Radio Rate Change command: {:?}", rate_change);
+                                                }
+                                            }
+                                        }
+                                        // Handle Command
+                                    }
+                                }
+                            }
+
+                        } else {
+                            info!("Failed to decode radio frame.");
+                        }
+
                     }
                     mavlink::uorocketry::MavMessage::COMMAND_MESSAGE(command) => {
+                        info!("Received command");
                     }
                     mavlink::uorocketry::MavMessage::HEARTBEAT(_) => {
+                        info!("Received heartbeat message.");
                     }
                     _ => {
+                        info!("Unknown mavlink message.");
                         // info!("Received unknown MAVLink message: {:?}", msg);
                     }
                 }
@@ -498,7 +669,7 @@ async fn radio_writer_task(mut tx: UartTx<'static, mode::Async>) {
                 message: data,
             },
         );
-
+        // info!("Writing radio message");
         mavlink::write_versioned_msg_async(&mut tx, mavlink::MavlinkVersion::V2, mav_header, &mav_message).await;
     }
 }
@@ -550,7 +721,7 @@ async fn main(spawner: Spawner) {
     info!("System starting...");
     {
         use core::mem::MaybeUninit;
-        const HEAP_SIZE: usize = 100000;
+        const HEAP_SIZE: usize = 40_000;
         static mut HEAP_MEM: [MaybeUninit<u8>; HEAP_SIZE] = [MaybeUninit::uninit(); HEAP_SIZE];
         unsafe { HEAP.init(HEAP_MEM.as_ptr() as usize, HEAP_SIZE) }
     }
@@ -596,14 +767,6 @@ async fn main(spawner: Spawner) {
     // config.rcc.ls = rcc::LsConfig::default_lse();
     let p = embassy_stm32::init(config);
     
-    // --- GPS Setup --- 
-    // let gps_uart_config = UartConfig::default();
-    // let gps_uart = Uart::new(
-    //     p.UART7, p.PF6, p.PF7, Irqs, p.DMA1_CH1, p.DMA1_CH0, gps_uart_config,
-    // ).unwrap();
-    // let (tx, rx) = gps_uart.split();
-    // static mut RX_BUF: [u8; SBG_BUFFER_SIZE] = [0; SBG_BUFFER_SIZE];
-    // let ring_rx = rx.into_ring_buffered(unsafe { &mut RX_BUF });
     info!("Heap usage: {} bytes", HEAP.used());
 
     // --- IMU Setup --- 
@@ -622,49 +785,30 @@ async fn main(spawner: Spawner) {
     let imu_odr = Input::new(p.PC0, Pull::None);
     let imu_cs = Output::new(p.PB6, Level::High, Speed::Low);
     let imu_nreset = Output::new(p.PD4, Level::High, Speed::Low);
-    let mut imu = imu::Iim20670::new(imu_spi, imu_cs, Some(imu_nreset), Delay).unwrap();
+    // let mut imu = imu::Iim20670::new(imu_spi, imu_cs, Some(imu_nreset), Delay).unwrap();
 
-    loop {
-        Timer::after(Duration::from_millis(100)).await;
-        let data = imu.read_all_converted();
-        match data {
-            Ok((accel, gyro)) => {
-                info!("Accel: x: {}, y: {}, z: {}", accel.x, accel.y, accel.z);
-                info!("Gyro: x: {}, y: {}, z: {}", gyro.x, gyro.y, gyro.z);
-            }
-            Err(e) => {
-            }
-        }
-
-
-        // let data = imu.read_accel_g();
-        // let data2 = imu.read_gyro_dps();
-        // match data {
-        //     Ok(accel) => {
-        //         info!("Accel: x: {}, y: {}, z: {}", accel.x, accel.y, accel.z);
-        //     }
-        //     Err(e) => {
-        //     }
-        // }
-
-        // match data2 {
-        //     Ok(gyro) => {
-        //         info!("Gyro: x: {}, y: {}, z: {}", gyro.x, gyro.y, gyro.z);
-        //     }
-        //     Err(e) => {
-        //     }
-        // }
-    }
+    // loop {
+    //     Timer::after(Duration::from_millis(100)).await;
+    //     let data = imu.read_all_converted();
+    //     match data {
+    //         Ok((accel, gyro)) => {
+    //             info!("Accel: x: {}, y: {}, z: {}", accel.x, accel.y, accel.z);
+    //             info!("Gyro: x: {}, y: {}, z: {}", gyro.x, gyro.y, gyro.z);
+    //         }
+    //         Err(e) => {
+    //         }
+    //     }
+    // }
 
     // --- SBG Setup ---
-    // let mut uart_config = UartConfig::default();
-    // uart_config.baudrate = 115200; 
-    // let usart = Uart::new(
-    //     p.UART4, p.PA1, p.PA0, Irqs, p.DMA1_CH1, p.DMA1_CH0, uart_config,
-    // ).unwrap();
-    // let (tx, rx) = usart.split();
-    // let ring_rx = rx.into_ring_buffered(unsafe { &mut RX_SBG_BUF });
-    // let mut sbg_pwr = Output::new(p.PD8, Level::High, Speed::Low);
+    let mut uart_config = UartConfig::default();
+    uart_config.baudrate = 115200; 
+    let usart = Uart::new(
+        p.UART4, p.PA1, p.PA0, Irqs, p.DMA1_CH1, p.DMA1_CH0, uart_config,
+    ).unwrap();
+    let (tx, rx) = usart.split();
+    let ring_rx = rx.into_ring_buffered(unsafe { &mut RX_SBG_BUF });
+    let mut sbg_pwr = Output::new(p.PD8, Level::High, Speed::Low);
   
     // // --- Baro SPI Setup ---
     let mut spi_config = SpiConfig::default();
@@ -759,131 +903,114 @@ async fn main(spawner: Spawner) {
 
     Delay.delay_ms(100);
 
-    let val_packet = CfgValSetBuilder {
-        version: 1,
-        layers: CfgLayerSet::RAM,
-        reserved1: 0,
-        cfg_data: &[Uart1OutProtUbx(true), Uart1InProtUbx(true)],
-    }.into_packet_vec();
-
-    info!("Packet val {}", val_packet.clone().as_slice());
-
-    gps_tx.blocking_write(val_packet.as_slice());
-
-    //
-    // let mut cfg_data = Vec::<CfgVal>::new();
-    //
-    // // Key to disable NMEA output on UART1. Set its value to 0 (false).
-    // cfg_data.push(CfgVal.::new(CfgKey::CFG_UART1OUTPROT_NMEA, 0));
-    //
-    // // Key to enable UBX output on UART1. Set its value to 1 (true).
-    // cfg_data.push(CfgVal::new(CfgKey::CFG_UART1OUTPROT_UBX, 1));
-    //
-    // // Optional: If you also want to set the baud rate permanently.
-    // // cfg_data.push(CfgVal::new(CfgKey::CFG_UART1_BAUDRATE, 9600));
-    //
-    //
-    // // 2. Build the CFG-VALSET packet.
-    // let packet = CfgValSetBuilder {
-    //     // Version must be 1 for key-value pair setting.
+    // let val_packet = CfgValSetBuilder {
     //     version: 1,
-    //
-    //     // This is the most important part. Specify the memory layers to save to.
-    //     // This makes the change permanent and survives a reboot.
-    //     // Using `all()` hits RAM, BBR, and Flash.
-    //     layers: CfgLayer::all(),
-    //
+    //     layers: CfgLayer::RAM,
     //     reserved1: 0,
-    //
-    //     // Pass the slice of key-value pairs.
-    //     cfg_data: &cfg_data,
+    //     cfg_data: &[Uart1OutProtUbx(true), Uart1InProtUbx(true)],
     // }.into_packet_vec();
+
+    // info!("Packet val {}", val_packet.clone().as_slice());
+
+    // gps_tx.blocking_write(val_packet.as_slice());
 
     Delay.delay_ms(1000);
 
-    let request =
-        UbxPacketRequest::request_for::<ublox::NavPosLlh>().into_packet_bytes();
-        gps_tx.blocking_write(&request);
+    // let request =
+    //     UbxPacketRequest::request_for::<ublox::NavPosLlh>().into_packet_bytes();
+    // gps_tx.blocking_write(&request);
 
-    loop {
-        let request =
-            UbxPacketRequest::request_for::<ublox::NavPosLlh>().into_packet_bytes();
-        // gps_tx.blocking_write(&request);
-        // Delay.delay_ms(1000);
-        let mut buf_data: [u8; GPS_BUFFER_SIZE] = [0; GPS_BUFFER_SIZE];
-        ring_gps_rx.read_exact(&mut buf_data).await.unwrap();
-        // info!("GPS data read: {:?}", &buf_data[..]);
-        // if let Ok(len) = gps_rx.read(&mut buf_data).await {
-                // info!("read");
+    // loop {
+    //     let request =
+    //         UbxPacketRequest::request_for::<ublox::NavPosLlh>().into_packet_bytes();
+    //     gps_tx.blocking_write(&request);
+    //     // Delay.delay_ms(1000);
+    //     let mut buf_data: [u8; GPS_BUFFER_SIZE] = [0; GPS_BUFFER_SIZE];
+    //     ring_gps_rx.read(&mut buf_data).await.unwrap();
+    //     info!("GPS data read: {:?}", &buf_data[..]);
+    //     // if let Ok(len) = gps_rx.read(&mut buf_data).await {
+    //             // info!("read");
 
-                // Delay.delay_ms(1000);
-                // cortex_m::asm::delay(10_000);
-        let mut buf: [u8; GPS_BUFFER_SIZE] = [0; GPS_BUFFER_SIZE];
-        let bytes: [u8; GPS_BUFFER_SIZE] = [0; GPS_BUFFER_SIZE];
+    //             Delay.delay_ms(1000);
+    //             // cortex_m::asm::delay(10_000);
+    //     let mut buf: [u8; GPS_BUFFER_SIZE] = [0; GPS_BUFFER_SIZE];
+    //     let bytes: [u8; GPS_BUFFER_SIZE] = [0; GPS_BUFFER_SIZE];
 
-        let mut nmea = nmea::Nmea::default();
-        let ascii_buf = unsafe {buf_data.as_ascii_unchecked()};
-        info!("BUFFER: {}", ascii_buf.as_str());
-        // if let Some(ascii_buf) = ascii_buf {
-            let res = nmea.parse(ascii_buf.as_str());
+    //     // let mut nmea = nmea::Nmea::default();
+    //     // let ascii_buf = unsafe {buf_data.as_ascii_unchecked()};
+    //     // info!("BUFFER: {}", ascii_buf.as_str());
+    //     // // if let Some(ascii_buf) = ascii_buf {
+    //     //     let res = nmea.parse(ascii_buf.as_str());
 
-            match res {
-                Ok(strings) => {
-                    info!("Result: {}", strings.as_str());
-                }
-                _ => {
-                    info!("nmea parser none found");
-                }
-            }
-        // } else {
-        //     info!("No valid sentence");
-        // }
+    //     //     match res {
+    //     //         Ok(strings) => {
+    //     //             info!("Result: {}", strings.as_str());
+    //     //         }
+    //     //         _ => {
+    //     //             info!("nmea parser none found");
+    //     //         }
+    //     //     }
 
-        // let buf: ublox::FixedLinearBuffer<'_> = ublox::FixedLinearBuffer::new(&mut buf[..]);
-        // let mut parser = ublox::Parser::new(buf);
-        // info!("GPS Parser initialized.");
-        // let mut msgs = parser.consume(&buf_data);
-        // info!("GPS Messages consumed. {}", msgs.next().is_some());
-        // while let Some(msg) = msgs.next() {
-        //     match msg {
-        //         Ok(msg) => match msg {
-        //             ublox::PacketRef::NavPosLlh(x) => {
-        //                 info!(
-        //                     "GPS latitude: {:?}, longitude {:?}",
-        //                     x.lat_degrees(),
-        //                     x.lon_degrees()
-        //                 );
-        //             }
-        //             ublox::PacketRef::NavStatus(x) => {
-        //                 info!("GPS fix stat: {:?}", x.fix_stat_raw());
-        //             }
-        //             ublox::PacketRef::NavDop(x) => {
-        //                 info!("GPS geometric drop: {:?}", x.geometric_dop());
-        //             }
-        //             ublox::PacketRef::NavSat(x) => {
-        //                 info!("GPS num sats used: {:?}", x.num_svs());
-        //             }
-        //             ublox::PacketRef::NavVelNed(x) => {
-        //                 info!("GPS velocity north: {:?}", x.vel_north());
-        //             }
-        //             ublox::PacketRef::NavPvt(x) => {
-        //                 info!("GPS nun sats PVT: {:?}", x.num_satellites());
-        //             }
-        //             _ => {
-        //                 info!("GPS Message not handled.");
-        //             }
-        //         },
-        //         Err(e) => {
-        //             info!("GPS parse Error");
-        //         }
-        //     }
-        // }
-        //
-        //
 
-            // }
-        // }
-    }
+    //     // } else {
+    //     //     info!("No valid sentence");
+    //     // }
+
+    //     let buf: ublox::FixedLinearBuffer<'_> = ublox::FixedLinearBuffer::new(&mut buf[..]);
+    //     let mut parser = ublox::Parser::new(buf);
+    //     // info!("GPS Parser initialized.");
+    //     let mut msgs = parser.consume(&buf_data);
+    //     // info!("GPS Messages consumed. {}", msgs.next().is_some());
+    //     while let Some(msg) = msgs.next() {
+    //         match msg {
+    //             Ok(msg) => match msg {
+    //                 ublox::PacketRef::NavPosLlh(x) => {
+    //                     info!(
+    //                         "GPS latitude: {:?}, longitude {:?}",
+    //                         x.lat_degrees(),
+    //                         x.lon_degrees()
+    //                     );
+    //                 }
+    //                 ublox::PacketRef::NavStatus(x) => {
+    //                     info!("GPS fix stat: {:?}", x.fix_stat_raw());
+    //                 }
+    //                 ublox::PacketRef::NavDop(x) => {
+    //                     info!("GPS geometric drop: {:?}", x.geometric_dop());
+    //                 }
+    //                 ublox::PacketRef::NavSat(x) => {
+    //                     info!("GPS num sats used: {:?}", x.num_svs());
+    //                 }
+    //                 ublox::PacketRef::NavVelNed(x) => {
+    //                     info!("GPS velocity north: {:?}", x.vel_north());
+    //                 }
+    //                 ublox::PacketRef::NavPvt(x) => {
+    //                     info!("GPS nun sats PVT: {:?}", x.num_satellites());
+    //                 }
+    //                 ublox::PacketRef::Unknown(msg) => {
+    //                     info!("Unknown GPS type.");
+    //                 }
+    //                 _ => {
+    //                     info!("GPS Message not handled.");
+    //                 }
+    //             },
+    //             Err(e) => {
+    //                 info!("GPS parse Error");
+    //             }
+    //         }
+    //     }
+    //     // }
+    // }
+
+
+    // --- Radio Setup --- 
+    // let mut radio_uart_config = UartConfig::default();
+    // radio_uart_config.baudrate = 57600; 
+    // let radio_uart = Uart::new(
+    //     p.UART7, p.PE7, p.PE8, Irqs, p.DMA2_CH2, p.DMA2_CH7, radio_uart_config,
+    // ).unwrap();
+    // let (radio_tx, radio_rx) = radio_uart.split();
+    // let radio_ring_rx = radio_rx.into_ring_buffered(unsafe { &mut RX_RADIO_BUF });
+  
 
     // // --- Boom Boom Setup --- 
     // /*
@@ -902,28 +1029,48 @@ async fn main(spawner: Spawner) {
     //  */
 
     // // let main_arm_test = Input::new(p.PD6, Pull::Down);
-    // let mut main_arm_test = Output::new(p.PD6, Level::Low, Speed::Low);
-    // let main_arm_test_b = Output::new(p.PD14, Level::Low, Speed::Low);
-    // let drogue_arm_test = Output::new(p.PC11, Level::Low, Speed::Low);
-    // let drogue_arm_test_b = Output::new(p.PD2, Level::Low, Speed::Low);
+    let mut main_arm_test = Output::new(p.PD6, Level::Low, Speed::Low);
+    let main_arm_test_b = Output::new(p.PD14, Level::Low, Speed::Low);
+    let drogue_arm_test = Output::new(p.PC11, Level::Low, Speed::Low);
+    let drogue_arm_test_b = Output::new(p.PD2, Level::Low, Speed::Low);
 
-    // let mut main_fire = Output::new(p.PD5, Level::Low, Speed::Low);
-    // let mut main_fire_b = Output::new(p.PD13, Level::Low, Speed::Low);
-    // let drogue_fire = Output::new(p.PC12, Level::Low, Speed::Low);
-    // let drogue_fire_b = Output::new(p.PD1, Level::Low, Speed::Low);
+    let mut main_fire = Output::new(p.PD5, Level::Low, Speed::Low);
+    let mut main_fire_b = Output::new(p.PD13, Level::Low, Speed::Low);
+    let drogue_fire = Output::new(p.PC12, Level::Low, Speed::Low);
+    let drogue_fire_b = Output::new(p.PD1, Level::Low, Speed::Low);
 
-    // let mut main_mcu_ematch_sense = p.PA2; 
-    // let mut main_mcu_ematch_sense_b = p.PB0; 
+    let mut main_mcu_ematch_sense = p.PA2; 
+    let mut main_mcu_ematch_sense_b = p.PB0; 
 
-    // let mut drogue_mcu_ematch_sense = p.PA3; 
-    // let mut drogue_mcu_ematch_sense_b = p.PC5; 
+    let mut drogue_mcu_ematch_sense = p.PA3; 
+    let mut drogue_mcu_ematch_sense_b = p.PC5; 
 
-    // let mut adc = Adc::new(p.ADC1);
-    // info!("ADC measurement main ematch {}", adc.blocking_read(&mut main_mcu_ematch_sense));
-    // info!("ADC measurement main B ematch {}", adc.blocking_read(&mut main_mcu_ematch_sense_b));
-    // info!("ADC measurement drogue ematch {}", adc.blocking_read(&mut drogue_mcu_ematch_sense));
-    // info!("ADC measurement drogue B ematch {}", adc.blocking_read(&mut drogue_mcu_ematch_sense_b));
-    // info!("ADC measurement main ematch {}", adc.blocking_read(&mut main_mcu_ematch_sense));
+    let mut adc = Adc::new(p.ADC1);
+    
+    info!("ADC measurement main ematch {}", adc.blocking_read(&mut main_mcu_ematch_sense));
+    info!("ADC measurement main B ematch {}", adc.blocking_read(&mut main_mcu_ematch_sense_b));
+    info!("ADC measurement drogue ematch {}", adc.blocking_read(&mut drogue_mcu_ematch_sense));
+    info!("ADC measurement drogue B ematch {}", adc.blocking_read(&mut drogue_mcu_ematch_sense_b));
+    info!("ADC measurement main ematch {}", adc.blocking_read(&mut main_mcu_ematch_sense));
+
+    let recovery_manager = RecoveryManager {
+        arming: Arming {
+            main: main_arm_test,
+            drogue: drogue_arm_test,
+            main_b: main_arm_test_b,
+            drogue_b: drogue_arm_test_b,
+        },
+        fire: Fire {
+            main: main_fire,
+            drogue: drogue_fire,
+            main_b: main_fire_b,
+            drogue_b: drogue_fire_b,
+        }
+    };
+    
+    RECOVERY_MANAGER.lock(|cell| {
+        *cell.borrow_mut() = Some(recovery_manager);
+    });
 
     // // --- Camera Triggers ---
     // let mut cam_trigger = Output::new(p.PE14, Level::Low, Speed::Low);
@@ -942,15 +1089,19 @@ async fn main(spawner: Spawner) {
     // let state_machine = StateMachine::new(traits::Context {});
 
     // // --- Radio --- 
-    // let mut uart_radio_config = UartConfig::default();
-    // uart_radio_config.baudrate = 57600; 
-    // uart_radio_config.data_bits = embassy_stm32::usart::DataBits::DataBits8;
-    // uart_radio_config.parity = embassy_stm32::usart::Parity::ParityNone;
-    // uart_radio_config.stop_bits = embassy_stm32::usart::StopBits::STOP1;
+    let mut uart_radio_config = UartConfig::default();
+    uart_radio_config.baudrate = 57600; 
+    uart_radio_config.data_bits = embassy_stm32::usart::DataBits::DataBits8;
+    uart_radio_config.parity = embassy_stm32::usart::Parity::ParityNone;
+    uart_radio_config.stop_bits = embassy_stm32::usart::StopBits::STOP1;
 
-    // let mut uart_radio = Uart::new(
-    //     p.UART7, p.PE7, p.PE8, Irqs, p.DMA2_CH3, p.DMA2_CH5, uart_radio_config
-    // ).unwrap();
+    let mut uart_radio = Uart::new(
+        p.UART7, p.PE7, p.PE8, Irqs, p.DMA2_CH3, p.DMA2_CH5, uart_radio_config
+    ).unwrap();
+
+    let (mut radio_tx, mut radio_rx) = uart_radio.split();
+    let mut radio_ring_rx = radio_rx.into_ring_buffered(unsafe { &mut RX_RADIO_BUF });
+   
 
     // // --- AI ---
     // // // Get a default device for the backend
@@ -975,14 +1126,16 @@ async fn main(spawner: Spawner) {
     // --- Spawning Tasks ---
     // spawner.must_spawn(led_blinker_task(p.PB14));
 
-    // spawner.must_spawn(uart_dma_reader_task(ring_rx));
+    spawner.must_spawn(uart_dma_reader_task(ring_rx));
     // spawner.must_spawn(uart_gps_dma_reader_task(ring_gps_rx, gps_tx));
-    // spawner.must_spawn(sbg_parser_task(tx));
-    // spawner.must_spawn(sbg_receiver_task());
-    spawner.must_spawn(baro_reader_task(baro));
+    spawner.must_spawn(sbg_parser_task(tx));
+    spawner.must_spawn(sbg_receiver_task());
+    // spawner.must_spawn(baro_reader_task(baro));
     // spawner.must_spawn(ai_task());
     // pass control of the spawner to the state machine
     // spawner.must_spawn(sm_task(spawner, state_machine));
+    spawner.must_spawn(radio_reader_task(radio_ring_rx));
+    spawner.must_spawn(radio_writer_task(radio_tx));
 }
 
 // fn run_model<'a>(model: &Model<NdArray>, device: &BackendDevice, input: f32) -> Tensor<Backend, 2> {
