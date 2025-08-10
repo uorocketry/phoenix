@@ -11,7 +11,7 @@ mod model;
 mod imu;
 
 use messages_prost::radio::radio_frame::Payload;
-use ublox::{cfg_val::CfgVal::*, CfgLayer};
+use ublox::{cfg_val::CfgVal::*, CfgLayerSet};
 use messages_prost::prost::Message;
 use embedded_hal_1::delay::DelayNs;
 use embedded_hal_1::digital::{OutputPin, PinState};
@@ -50,7 +50,7 @@ use heapless::{HistoryBuffer, Vec};
 use messages_prost::sensor::sbg::{SbgData, SbgMessage};
 use sbg_rs::sbg::SBG_BUFFER_SIZE;
 use static_cell::StaticCell;
-use ublox::{CfgPrtUartBuilder, CfgValSetBuilder, DataBits, InProtoMask, OutProtoMask, Parity, StopBits, UartMode, UartPortId, UbxPacketRequest};
+use ublox::{CfgPrtUartBuilder, CfgRstBuilder, CfgValSetBuilder, DataBits, InProtoMask, NavBbrMask, OutProtoMask, Parity, ResetMode, StopBits, UartMode, UartPortId, UbxPacketRequest};
 use crate::traits::Context;
 use {defmt_rtt as _};
 use {panic_probe as _};
@@ -864,14 +864,15 @@ async fn main(spawner: Spawner) {
     // info!("Sd write and setup complete");
 
     // // --- GPS Setup ---
-    let mut gps_enable = Output::new(p.PA4, Level::Low, Speed::Low); 
-    let mut gps_reset = Output::new(p.PB2, Level::Low, Speed::Low); 
+    let mut gps_enable = Output::new(p.PA4, Level::High, Speed::Low); 
+    let mut gps_reset = Output::new(p.PB2, Level::High, Speed::Low); 
     let mut uart_gps_config = UartConfig::default();
     uart_gps_config.baudrate = 9600; 
     uart_gps_config.data_bits = embassy_stm32::usart::DataBits::DataBits8;
     uart_gps_config.parity = embassy_stm32::usart::Parity::ParityNone;
     uart_gps_config.stop_bits = embassy_stm32::usart::StopBits::STOP1;
     uart_gps_config.detect_previous_overrun = false; 
+    
     // let uart_gps = Uart::new_blocking(
     //     p.UART8,  p.PE0, p.PE1, uart_gps_config
     // ).unwrap();
@@ -885,7 +886,7 @@ async fn main(spawner: Spawner) {
     Delay.delay_ms(3000);
     gps_reset.set_high();
     gps_enable.set_low();
-    Delay.delay_ms(1000);
+    Delay.delay_ms(2000);
     let packet: [u8; 28] = CfgPrtUartBuilder {
         portid: UartPortId::Uart1,
         reserved0: 0,
@@ -902,20 +903,86 @@ async fn main(spawner: Spawner) {
     info!("Sending GPS packet: {:?}", &packet);
     gps_tx.write(&packet).await.expect("TODO: panic message");
 
-    Delay.delay_ms(100);
+    Delay.delay_ms(2000);
 
-    let val_packet = CfgValSetBuilder {
+    // let val_packet = CfgValSetBuilder {
+    //     version: 1,
+    //     layers: CfgLayerSet::FLASH,
+    //     reserved1: 0,
+    //     cfg_data: &[Uart1OutProtUbx(true), Uart1InProtUbx(true)],
+    // }.into_packet_vec();
+
+    // info!("Packet val {}", val_packet.clone().as_slice());
+
+    // gps_tx.write(val_packet.as_slice()).await.expect("TODO: panic message");
+
+    // let val_packet = CfgValSetBuilder {
+    //     version: 1,
+    //     // Save to RAM and BBR so it's active now and persists after software reset
+    //     layers: CfgLayerSet::BBR | CfgLayerSet::RAM,
+    //     reserved1: 0,
+    //     cfg_data: &[
+    //         // Enable UBX-NAV-PVT on our UART port
+    //         CfgVal::MsgOutUbxNavPvtUart1(1),
+    //         // Set measurement rate to 200ms (5 Hz)
+    //         CfgVal::RateMeas(200),
+    //         // Make sure navigation rate matches measurement rate
+    //         CfgVal::RateNav(1),
+    //     ],
+    // }.into_packet_vec();
+
+    // gps_tx.write(val_packet.as_slice()).await.expect("TODO: panic message");
+
+    // let reset_packet = CfgRstBuilder {
+    //     // We don't need to clear any data, just apply the new settings
+    //     nav_bbr_mask: NavBbrMask::empty(),
+    //     // This is the key: a software reset applies BBR settings without clearing them
+    //     reset_mode: ResetMode::ControlledSoftwareReset,
+    //     reserved1: 0,
+    // }
+    // .into_packet_bytes();
+
+    // info!("Sending software reset to apply configuration");
+    // gps_tx.write(&reset_packet).await.unwrap();
+
+ let config_packet = CfgValSetBuilder {
         version: 1,
-        layers: CfgLayer::RAM,
+        // Save to RAM (to apply now) and BBR (to make it persistent)
+        layers: CfgLayerSet::BBR | CfgLayerSet::RAM,
         reserved1: 0,
-        cfg_data: &[Uart1OutProtUbx(true), Uart1InProtUbx(true)],
+        cfg_data: &[
+            // --- Port Settings ---
+            CfgVal::Uart1Baudrate(38400),
+            CfgVal::Uart1InProtUbx(true),
+            CfgVal::Uart1InProtNmea(false), // Explicitly disable NMEA
+            CfgVal::Uart1InProtRtcm3x(false),
+            CfgVal::Uart1OutProtUbx(true),
+            CfgVal::Uart1OutProtNmea(false), // Explicitly disable NMEA
+
+            // --- Message Settings ---
+            CfgVal::MsgOutUbxNavPvtUart1(1), // Enable NAV-PVT on UART1
+
+            // --- Rate Settings ---
+            CfgVal::RateMeas(200), // 200ms = 5Hz
+            CfgVal::RateNav(1),    // Navigation rate = Measurement rate
+        ],
     }.into_packet_vec();
 
-    info!("Packet val {}", val_packet.clone().as_slice());
+    gps_tx.write(config_packet.as_slice()).await.expect("TODO: panic message");
 
-    gps_tx.write(val_packet.as_slice()).await.expect("TODO: panic message");
 
     Delay.delay_ms(1000);
+
+    let reset_packet = CfgRstBuilder {
+        nav_bbr_mask: NavBbrMask::empty(), // .empty() preserves all BBR data
+        reset_mode: ResetMode::ControlledSoftwareReset,
+        reserved1: 0,
+    }
+    .into_packet_bytes();
+
+    info!("Sending software reset to apply configuration");
+    gps_tx.write(&reset_packet).await.unwrap();
+    Delay.delay_ms(500); // Give module time to reset
 
     // let request =
     //     UbxPacketRequest::request_for::<ublox::NavPosLlh>().into_packet_bytes();
@@ -960,7 +1027,7 @@ async fn main(spawner: Spawner) {
     //     let buf: ublox::FixedLinearBuffer<'_> = ublox::FixedLinearBuffer::new(&mut buf[..]);
     //     let mut parser = ublox::Parser::new(buf);
     //     // info!("GPS Parser initialized.");
-    //     let mut msgs = parser.consume(&buf_data);
+    //     let mut msgs = parser.consume_ubx(&buf_data);
     //     info!("GPS Messages consumed. {}", msgs.next().is_some());
     //     while let Some(msg) = msgs.next() {
     //         match msg {
@@ -1002,17 +1069,7 @@ async fn main(spawner: Spawner) {
     //     // }
     // }
 
-
-    // --- Radio Setup --- 
-    // let mut radio_uart_config = UartConfig::default();
-    // radio_uart_config.baudrate = 57600; 
-    // let radio_uart = Uart::new(
-    //     p.UART7, p.PE7, p.PE8, Irqs, p.DMA2_CH2, p.DMA2_CH7, radio_uart_config,
-    // ).unwrap();
-    // let (radio_tx, radio_rx) = radio_uart.split();
-    // let radio_ring_rx = radio_rx.into_ring_buffered(unsafe { &mut RX_RADIO_BUF });
-  
-
+    
     // // --- Boom Boom Setup --- 
     // /*
     //     MAIN_ARM/TEST = PD6
@@ -1028,6 +1085,8 @@ async fn main(spawner: Spawner) {
     //     DROUGE_MCU_EMATCH_SENSE = PA3
     //     DROGUE_MCU_EMATCH_SENSE_B = PC5
     //  */
+
+    let mut ejection_enable = Input::new(p.PC1, Pull::Down);
 
     // // let main_arm_test = Input::new(p.PD6, Pull::Down);
     let mut main_arm_test = Output::new(p.PD6, Level::Low, Speed::Low);
@@ -1047,7 +1106,9 @@ async fn main(spawner: Spawner) {
     let mut drogue_mcu_ematch_sense_b = p.PC5; 
 
     let mut adc = Adc::new(p.ADC1);
-    
+
+    info!("Ejection enable measurement: {}", ejection_enable.get_level());
+
     info!("ADC measurement main ematch {}", adc.blocking_read(&mut main_mcu_ematch_sense));
     info!("ADC measurement main B ematch {}", adc.blocking_read(&mut main_mcu_ematch_sense_b));
     info!("ADC measurement drogue ematch {}", adc.blocking_read(&mut drogue_mcu_ematch_sense));
@@ -1073,18 +1134,32 @@ async fn main(spawner: Spawner) {
         *cell.borrow_mut() = Some(recovery_manager);
     });
 
-    // // --- Camera Triggers ---
-    // let mut cam_trigger = Output::new(p.PE14, Level::Low, Speed::Low);
-    // let mut cam_trigger_b = Output::new(p.PE12, Level::Low, Speed::Low);
+    // --- Camera Triggers ---
+    let mut cam_trigger = Output::new(p.PE14, Level::Low, Speed::Low);
+    let mut cam_trigger_b = Output::new(p.PE12, Level::Low, Speed::Low);
+    // power on 
+    cam_trigger.set_high();
+    Delay.delay_ms(2_000);
+    cam_trigger.set_low();
+    Delay.delay_ms(100); 
+    // trigger the camera
+    cam_trigger.set_high();
+    Delay.delay_ms(500);
+    cam_trigger.set_low();
+    Delay.delay_ms(10_000);
+    // stop recording 
+    cam_trigger.set_high();
+    Delay.delay_ms(500);
+    cam_trigger.set_low();
 
-    // // // --- Buzzer 🐝 ---
-    // let buzz_out_pin = PwmPin::new_ch1(p.PC6, OutputType::PushPull);
-    // let mut pwm = SimplePwm::new(p.TIM3, Some(buzz_out_pin), None, None, None, khz(4), Default::default());
-    // let mut ch1 = pwm.ch1();
-    // info!("Duty Cycle: {}", ch1.max_duty_cycle());
-    // ch1.set_duty_cycle(ch1.max_duty_cycle() / 4);
-    // ch1.enable();   
-    // // music::play_song(&mut pwm, music::MARIO_MELODY, 100).await;
+    // --- Buzzer 🐝 ---
+    let buzz_out_pin = PwmPin::new_ch1(p.PC6, OutputType::PushPull);
+    let mut pwm = SimplePwm::new(p.TIM3, Some(buzz_out_pin), None, None, None, khz(4), Default::default());
+    let mut ch1 = pwm.ch1();
+    info!("Duty Cycle: {}", ch1.max_duty_cycle());
+    ch1.set_duty_cycle(ch1.max_duty_cycle() / 4);
+    ch1.enable();   
+    music::play_song(&mut pwm, music::TWINKLE_MELODY, 130).await;
 
     // // --- State Machine ---
     // let state_machine = StateMachine::new(traits::Context {});
@@ -1127,10 +1202,10 @@ async fn main(spawner: Spawner) {
     // --- Spawning Tasks ---
     // spawner.must_spawn(led_blinker_task(p.PB14));
 
-    spawner.must_spawn(uart_dma_reader_task(ring_rx));
+    // spawner.must_spawn(uart_dma_reader_task(ring_rx));
     // spawner.must_spawn(uart_gps_dma_reader_task(ring_gps_rx, gps_tx));
-    spawner.must_spawn(sbg_parser_task(tx));
-    spawner.must_spawn(sbg_receiver_task());
+    // spawner.must_spawn(sbg_parser_task(tx));
+    // spawner.must_spawn(sbg_receiver_task());
     // spawner.must_spawn(baro_reader_task(baro));
     // spawner.must_spawn(ai_task());
     // pass control of the spawner to the state machine

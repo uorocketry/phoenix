@@ -2851,7 +2851,7 @@ dependencies = [
  "prost",
  "prost-build",
  "serde",
- "ublox 0.4.5 (git+https://github.com/uorocketry/ublox)",
+ "ublox 0.4.5",
 ]
 
 [[package]]
@@ -3269,7 +3269,7 @@ dependencies = [
  "smlang",
  "static_cell",
  "stm32-fmc",
- "ublox 0.4.5 (registry+https://github.com/rust-lang/crates.io-index)",
+ "ublox 0.6.0",
 ]
 
 [[package]]
@@ -4596,19 +4596,6 @@ checksum = "1dccffe3ce07af9386bfd29e80c0ab1a8205a2fc34e4bcd40364df902cfa8f3f"
 [[package]]
 name = "ublox"
 version = "0.4.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ad0c3df1bc466bd97f94ab437aab9116d5c15909c8a5cb9905ee3c11df998e8"
-dependencies = [
- "bitflags 2.9.1",
- "chrono 0.4.41",
- "num-traits",
- "serde",
- "ublox_derive 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
-]
-
-[[package]]
-name = "ublox"
-version = "0.4.5"
 source = "git+https://github.com/uorocketry/ublox#286d43a3ae9a3ba30a04be04c65bf89aca6b1bfe"
 dependencies = [
  "bitflags 2.9.1",
@@ -4616,14 +4603,26 @@ dependencies = [
  "defmt 0.3.100",
  "num-traits",
  "serde",
- "ublox_derive 0.1.0 (git+https://github.com/uorocketry/ublox)",
+ "ublox_derive 0.1.0",
+]
+
+[[package]]
+name = "ublox"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0456d0c38f15a56f5a12af23efe86719b757744ededebd69eee3320ed24ad50f"
+dependencies = [
+ "bitflags 2.9.1",
+ "chrono 0.4.41",
+ "num-traits",
+ "serde",
+ "ublox_derive 0.3.0",
 ]
 
 [[package]]
 name = "ublox_derive"
 version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dea60f23c86d2329b7162f6ebb82854bc77b992a9984e1fdfe8707f88e0e3e69"
+source = "git+https://github.com/uorocketry/ublox#286d43a3ae9a3ba30a04be04c65bf89aca6b1bfe"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4632,8 +4631,9 @@ dependencies = [
 
 [[package]]
 name = "ublox_derive"
-version = "0.1.0"
-source = "git+https://github.com/uorocketry/ublox#286d43a3ae9a3ba30a04be04c65bf89aca6b1bfe"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "290ba2a4bfe92acb91bb9c0cdae32e9a1cda9cfe5b3329eaf9a444c522512de9"
 dependencies = [
  "proc-macro2",
  "quote",
