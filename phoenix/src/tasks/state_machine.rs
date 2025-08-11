@@ -5,7 +5,7 @@ use smlang::statemachine;
 
 use crate::traits::Context;
 
-// Moved from main.rs for cleanliness. Behavior unchanged.
+// Single source of truth for the state machine
 statemachine! {
     transitions: {
         *Init + Start = WaitForLaunch,
@@ -20,31 +20,21 @@ statemachine! {
     }
 }
 
-// Original signature (kept for reference; requires Context to implement StateMachineContext):
-// #[task]
-// pub async fn sm_task(_spawner: embassy_executor::Spawner, state_machine: StateMachine<Context>) {
-//     info!("State Machine task started.");
-//     loop {
-//         match state_machine.state {
-//             States::Ascent => {}
-//             States::Fault => {}
-//             States::Init => {}
-//             States::WaitForLaunch => {}
-//             States::Descent => {}
-//             States::DrogueDescent => {}
-//             States::Fuck => {}
-//             States::Landed => {}
-//             States::MainDescent => {}
-//         }
-//         Timer::after(Duration::from_millis(1000)).await;
-//     }
-// }
-
-// Compilable stub until Context implements the required trait. Behavior preserved in comments above.
 #[task]
-pub async fn sm_task_stub() {
-    info!("State Machine task stub started.");
+pub async fn sm_task(_spawner: embassy_executor::Spawner, mut state_machine: StateMachine<Context>) {
+    info!("State Machine task started.");
     loop {
+        match state_machine.state {
+            States::Ascent => {}
+            States::Fault => {}
+            States::Init => {}
+            States::WaitForLaunch => {}
+            States::Descent => {}
+            States::DrogueDescent => {}
+            States::Fuck => {}
+            States::Landed => {}
+            States::MainDescent => {}
+        }
         Timer::after(Duration::from_millis(1000)).await;
     }
 }

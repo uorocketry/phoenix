@@ -1,4 +1,4 @@
-use crate::{StateMachineContext, States};
+use crate::tasks::state_machine::{StateMachineContext, States};
 use messages_prost::state::State;
 
 pub struct Context {}
