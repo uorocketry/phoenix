@@ -6,15 +6,19 @@ use core::ptr;
 // use crate::app::sbg_handle_data;
 // use crate::app::sbg_sd_task as sbg_sd;
 // use crate::app::sbg_write_data;
-use super::RTC;
-use crate::SBG_CHANNEL;
+use super::sbg_manager;
+use crate::resources::{BUFFER_CHANNEL, RADIO_CHANNEL, RTC, SBG_CHANNEL};
+use crate::HEAP;
 use chrono::NaiveDateTime;
+use defmt::info;
 use embassy_stm32::mode;
-use embassy_stm32::usart::UartTx;
+use embassy_stm32::usart::{RingBufferedUartRx, UartTx};
+use embassy_time::Delay;
+use embedded_hal_1::delay::DelayNs;
 use heapless::Vec;
+use messages_prost::prost::Message;
 use sbg_rs::sbg;
 use sbg_rs::sbg::{CallbackData, SBG, SBG_BUFFER_SIZE};
-use super::HEAP;
 // use stm32h7xx_hal::dma::dma::StreamX;
 // use stm32h7xx_hal::dma::{
 //     dma::{DmaConfig, StreamsTuple},
@@ -23,6 +27,51 @@ use super::HEAP;
 // use stm32h7xx_hal::pac::UART4;
 // use stm32h7xx_hal::serial::{Rx, Tx};
 
+#[embassy_executor::task]
+async fn uart_dma_reader_task(mut rx: RingBufferedUartRx<'static>) {
+    info!("DMA reader task spawned.");
+    loop {
+        let mut buf: [u8; SBG_BUFFER_SIZE] = [0; SBG_BUFFER_SIZE];
+        if let Ok(len) = rx.read(&mut buf).await {
+            if len > 0 {
+                let _ = BUFFER_CHANNEL.send(buf).await;
+            }
+        }
+        Delay.delay_ms(100);
+    }
+}
+
+#[embassy_executor::task]
+async fn sbg_parser_task(tx: UartTx<'static, mode::Async>) {
+    let mut sbg = sbg_manager::SBGManager::new(tx);
+    loop {
+        let full_buffer = BUFFER_CHANNEL.receive().await;
+        sbg.sbg_device.read_data(&full_buffer.try_into().unwrap());
+    }
+}
+
+#[embassy_executor::task]
+async fn sbg_receiver_task() {
+    loop {
+        let data = SBG_CHANNEL.receive().await;
+        match data.data {
+            Some(x) => {
+                let mut buf: [u8; 255] = [0; 255];
+                let msg = messages_prost::radio::RadioFrame {
+                    node: messages_prost::common::Node::Phoenix.into(),
+                    payload: Some(messages_prost::radio::radio_frame::Payload::Sbg(data)),
+                };
+                msg.encode_length_delimited(&mut buf.as_mut())
+                    .expect("Failed to encode SBG GPS Position");
+                RADIO_CHANNEL.send(buf).await;
+            }
+            None => {
+                info!("No SBG data received");
+            }
+        }
+    }
+}
+
 pub struct SBGManager {
     pub sbg_device: SBG,
     sbg_tx: UartTx<'static, mode::Async>,
@@ -30,7 +79,6 @@ pub struct SBGManager {
 
 impl SBGManager {
     pub fn new(sbg_tx: UartTx<'static, mode::Async>) -> Self {
-
         let sbg: sbg::SBG = sbg::SBG::new(
             |data| {
                 sbg_handle_data(data);
@@ -41,7 +89,7 @@ impl SBGManager {
             },
             || sbg_get_time(),
             || {
-                // TODO: implement later 
+                // TODO: implement later
                 // sbg_flush::spawn().ok();
             },
         );

@@ -23,19 +23,38 @@ const NOTE_A4: u16 = 440;
 /// Melody for the first part of the Super Mario Bros. theme.
 /// Each tuple is (note_frequency, duration_in_beats).
 pub const MARIO_MELODY: &[(u16, f32)] = &[
-    (NOTE_E5, 1.0), (NOTE_E5, 1.0), (REST, 1.0), (NOTE_E5, 1.0),
-    (REST, 1.0), (NOTE_C5, 1.0), (NOTE_E5, 1.0), (REST, 1.0),
-    (NOTE_G5, 2.0), (REST, 2.0), (NOTE_G4, 2.0), (REST, 2.0),
+    (NOTE_E5, 1.0),
+    (NOTE_E5, 1.0),
+    (REST, 1.0),
+    (NOTE_E5, 1.0),
+    (REST, 1.0),
+    (NOTE_C5, 1.0),
+    (NOTE_E5, 1.0),
+    (REST, 1.0),
+    (NOTE_G5, 2.0),
+    (REST, 2.0),
+    (NOTE_G4, 2.0),
+    (REST, 2.0),
 ];
 
 /// Melody for "Twinkle, Twinkle, Little Star"
 pub const TWINKLE_MELODY: &[(u16, f32)] = &[
-    (NOTE_C4, 1.0), (NOTE_C4, 1.0), (NOTE_G4, 1.0), (NOTE_G4, 1.0),
-    (NOTE_A4, 1.0), (NOTE_A4, 1.0), (NOTE_G4, 2.0), (REST, 0.5),
-    (NOTE_F4, 1.0), (NOTE_F4, 1.0), (NOTE_E4, 1.0), (NOTE_E4, 1.0),
-    (NOTE_D4, 1.0), (NOTE_D4, 1.0), (NOTE_C4, 2.0),
+    (NOTE_C4, 1.0),
+    (NOTE_C4, 1.0),
+    (NOTE_G4, 1.0),
+    (NOTE_G4, 1.0),
+    (NOTE_A4, 1.0),
+    (NOTE_A4, 1.0),
+    (NOTE_G4, 2.0),
+    (REST, 0.5),
+    (NOTE_F4, 1.0),
+    (NOTE_F4, 1.0),
+    (NOTE_E4, 1.0),
+    (NOTE_E4, 1.0),
+    (NOTE_D4, 1.0),
+    (NOTE_D4, 1.0),
+    (NOTE_C4, 2.0),
 ];
-
 
 /// A helper function to play a song on a PWM channel.
 ///

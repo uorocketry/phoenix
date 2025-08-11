@@ -3,6 +3,12 @@
 #![no_std]
 
 use defmt::{error, info, warn};
+use embassy_stm32::gpio::{Input, Level, Output, Pull, Speed};
+use embassy_stm32::mode::{Async, Blocking};
+use embassy_stm32::peripherals::{PB4, PB5, PB6, PC0, PC10, PD4, SPI3};
+use embassy_stm32::spi::{Config, Spi};
+use embassy_stm32::time::mhz;
+use embassy_time::{Delay, Duration, Timer};
 use embedded_hal_1::delay::DelayNs;
 use embedded_hal_1::digital::OutputPin;
 use embedded_hal_1::spi::SpiBus;
@@ -33,7 +39,6 @@ pub struct SelfTestValues {
     pub gyro_y_diff: i16,
     pub gyro_z_diff: i16,
 }
-
 
 /// Represents the IIM-20670 device.
 pub struct Iim20670<SPI, CS, NRESET, DELAY> {
@@ -135,14 +140,17 @@ where
     pub fn new(
         spi: SPI,
         mut cs: CS,
-        mut nreset: Option<NRESET>,
-        mut delay: DELAY,
+        nreset: Option<NRESET>,
+        delay: DELAY,
     ) -> Result<Self, Error<SPIE, CSE, RESETE>> {
         info!("Starting IIM-20670 initialization...");
         cs.set_high().map_err(Error::Cs)?;
 
         let mut driver = Self {
-            spi, cs, nreset, delay,
+            spi,
+            cs,
+            nreset,
+            delay,
             accel_fsr: AccelFsr::G16,
             gyro_fsr: GyroFsr::Dps1966,
         };
@@ -169,7 +177,12 @@ where
 
     // ... (rest of the functions are unchanged) ...
 
-    fn spi_transaction(&mut self, reg: u8, data: u16, is_write: bool) -> Result<u16, Error<SPIE, CSE, RESETE>> {
+    fn spi_transaction(
+        &mut self,
+        reg: u8,
+        data: u16,
+        is_write: bool,
+    ) -> Result<u16, Error<SPIE, CSE, RESETE>> {
         let _guard = CsGuard::new(&mut self.cs).map_err(Error::Cs)?;
 
         let rw_bit = if is_write { 1u32 } else { 0u32 };
@@ -179,7 +192,9 @@ where
         let mut buffer = tx_word.to_be_bytes();
 
         info!("  SPI TX -> {=[u8]:#X}", buffer);
-        self.spi.transfer_in_place(&mut buffer).map_err(Error::Spi)?;
+        self.spi
+            .transfer_in_place(&mut buffer)
+            .map_err(Error::Spi)?;
         info!("  SPI RX <- {=[u8]:#X}", buffer);
 
         let response_word = u32::from_be_bytes(buffer);
@@ -201,7 +216,9 @@ where
         let _guard = CsGuard::new(&mut self.cs).map_err(Error::Cs)?;
         let mut buffer = command.to_be_bytes();
         info!("  SPI TX -> {=[u8]:#X}", buffer);
-        self.spi.transfer_in_place(&mut buffer).map_err(Error::Spi)?;
+        self.spi
+            .transfer_in_place(&mut buffer)
+            .map_err(Error::Spi)?;
         info!("  SPI RX <- {=[u8]:#X}", buffer);
 
         let response_word = u32::from_be_bytes(buffer);
@@ -323,9 +340,50 @@ where
         })
     }
 
-    pub fn read_all_converted(&mut self) -> Result<(Acceleration, AngularRate), Error<SPIE, CSE, RESETE>> {
+    pub fn read_all_converted(
+        &mut self,
+    ) -> Result<(Acceleration, AngularRate), Error<SPIE, CSE, RESETE>> {
         let accel = self.read_accel_g()?;
         let gyro = self.read_gyro_dps()?;
         Ok((accel, gyro))
+    }
+}
+
+pub fn init_imu(
+    spi: SPI3,
+    sck: PC10,
+    mosi: PB5,
+    miso: PB4,
+    odr: PC0,
+    cs: PB6,
+    nreset: PD4,
+) -> Iim20670<Spi<'static, Blocking>, Output<'static>, Output<'static>, Delay> {
+    let mut imu_spi_config = Config::default();
+    imu_spi_config.frequency = mhz(9);
+    imu_spi_config.mode = embassy_stm32::spi::Mode {
+        polarity: embassy_stm32::spi::Polarity::IdleLow,
+        phase: embassy_stm32::spi::Phase::CaptureOnFirstTransition,
+    };
+    let imu_spi = Spi::new_blocking(spi, sck, mosi, miso, imu_spi_config);
+    let imu_odr = Input::new(odr, Pull::None);
+    let imu_cs = Output::new(cs, Level::High, Speed::Low);
+    let imu_nreset = Output::new(nreset, Level::High, Speed::Low);
+    Iim20670::new(imu_spi, imu_cs, Some(imu_nreset), Delay).unwrap()
+}
+
+#[embassy_executor::task]
+pub async fn imu_task(
+    mut imu: Iim20670<Spi<'static, Blocking>, Output<'static>, Output<'static>, Delay>,
+) {
+    loop {
+        Timer::after(Duration::from_millis(100)).await;
+        let data = imu.read_all_converted();
+        match data {
+            Ok((accel, gyro)) => {
+                info!("Accel: x: {}, y: {}, z: {}", accel.x, accel.y, accel.z);
+                info!("Gyro: x: {}, y: {}, z: {}", gyro.x, gyro.y, gyro.z);
+            }
+            Err(e) => {}
+        }
     }
 }
