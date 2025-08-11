@@ -6,15 +6,13 @@ use core::ptr;
 // use crate::app::sbg_handle_data;
 // use crate::app::sbg_sd_task as sbg_sd;
 // use crate::app::sbg_write_data;
-use super::RTC;
-use crate::SBG_CHANNEL;
+use crate::resources::{HEAP, RTC, SBG_CHANNEL};
 use chrono::NaiveDateTime;
 use embassy_stm32::mode;
 use embassy_stm32::usart::UartTx;
 use heapless::Vec;
 use sbg_rs::sbg;
 use sbg_rs::sbg::{CallbackData, SBG, SBG_BUFFER_SIZE};
-use super::HEAP;
 // use stm32h7xx_hal::dma::dma::StreamX;
 // use stm32h7xx_hal::dma::{
 //     dma::{DmaConfig, StreamsTuple},
@@ -30,7 +28,6 @@ pub struct SBGManager {
 
 impl SBGManager {
     pub fn new(sbg_tx: UartTx<'static, mode::Async>) -> Self {
-
         let sbg: sbg::SBG = sbg::SBG::new(
             |data| {
                 sbg_handle_data(data);
@@ -41,7 +38,7 @@ impl SBGManager {
             },
             || sbg_get_time(),
             || {
-                // TODO: implement later 
+                // TODO: implement later
                 // sbg_flush::spawn().ok();
             },
         );
@@ -86,7 +83,7 @@ pub fn sbg_get_time() -> u32 {
 
 /// Publishes data to the SBG channel.
 pub fn sbg_handle_data(data: CallbackData) {
-    match data {
+    let _ = match data {
         CallbackData::Air(x) => SBG_CHANNEL.try_send(messages_prost::sensor::sbg::SbgData {
             data: Some(messages_prost::sensor::sbg::sbg_data::Data::Air(x)),
         }),

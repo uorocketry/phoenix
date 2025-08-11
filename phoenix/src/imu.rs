@@ -1,7 +1,5 @@
 //! Blocking SPI driver for the TDK IIM-20670 IMU with unit conversions and self-test.
 
-#![no_std]
-
 use defmt::{error, info, warn};
 use embedded_hal_1::delay::DelayNs;
 use embedded_hal_1::digital::OutputPin;
@@ -33,7 +31,6 @@ pub struct SelfTestValues {
     pub gyro_y_diff: i16,
     pub gyro_z_diff: i16,
 }
-
 
 /// Represents the IIM-20670 device.
 pub struct Iim20670<SPI, CS, NRESET, DELAY> {
@@ -142,7 +139,10 @@ where
         cs.set_high().map_err(Error::Cs)?;
 
         let mut driver = Self {
-            spi, cs, nreset, delay,
+            spi,
+            cs,
+            nreset,
+            delay,
             accel_fsr: AccelFsr::G16,
             gyro_fsr: GyroFsr::Dps1966,
         };
@@ -169,7 +169,12 @@ where
 
     // ... (rest of the functions are unchanged) ...
 
-    fn spi_transaction(&mut self, reg: u8, data: u16, is_write: bool) -> Result<u16, Error<SPIE, CSE, RESETE>> {
+    fn spi_transaction(
+        &mut self,
+        reg: u8,
+        data: u16,
+        is_write: bool,
+    ) -> Result<u16, Error<SPIE, CSE, RESETE>> {
         let _guard = CsGuard::new(&mut self.cs).map_err(Error::Cs)?;
 
         let rw_bit = if is_write { 1u32 } else { 0u32 };
@@ -179,7 +184,9 @@ where
         let mut buffer = tx_word.to_be_bytes();
 
         info!("  SPI TX -> {=[u8]:#X}", buffer);
-        self.spi.transfer_in_place(&mut buffer).map_err(Error::Spi)?;
+        self.spi
+            .transfer_in_place(&mut buffer)
+            .map_err(Error::Spi)?;
         info!("  SPI RX <- {=[u8]:#X}", buffer);
 
         let response_word = u32::from_be_bytes(buffer);
@@ -201,7 +208,9 @@ where
         let _guard = CsGuard::new(&mut self.cs).map_err(Error::Cs)?;
         let mut buffer = command.to_be_bytes();
         info!("  SPI TX -> {=[u8]:#X}", buffer);
-        self.spi.transfer_in_place(&mut buffer).map_err(Error::Spi)?;
+        self.spi
+            .transfer_in_place(&mut buffer)
+            .map_err(Error::Spi)?;
         info!("  SPI RX <- {=[u8]:#X}", buffer);
 
         let response_word = u32::from_be_bytes(buffer);
@@ -323,7 +332,9 @@ where
         })
     }
 
-    pub fn read_all_converted(&mut self) -> Result<(Acceleration, AngularRate), Error<SPIE, CSE, RESETE>> {
+    pub fn read_all_converted(
+        &mut self,
+    ) -> Result<(Acceleration, AngularRate), Error<SPIE, CSE, RESETE>> {
         let accel = self.read_accel_g()?;
         let gyro = self.read_gyro_dps()?;
         Ok((accel, gyro))
