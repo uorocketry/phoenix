@@ -25,7 +25,6 @@ use burn::{
     record::{BinBytesRecorder, FullPrecisionSettings, Recorder}, // <-- FIX: Use BinBytesRecorder
 };
 use core::cell::RefCell;
-use core::marker::PhantomData;
 use defmt::*;
 use embassy_executor::Spawner;
 use embassy_stm32::gpio::{Input, Level, Output, OutputType, Pull, Speed};
@@ -82,69 +81,6 @@ type Backend = NdArray<f32>;
 type BackendDevice = <Backend as burn::tensor::backend::Backend>::Device;
 
 use crate::resources::{Irqs, BUFFER_CHANNEL, HEAP, RX_GPS_BUF, RX_RADIO_BUF, RX_SBG_BUF};
-
-statemachine! {
-    transitions: {
-        *Init + Start = WaitForLaunch,
-        WaitForLaunch + Launch = Ascent,
-        Ascent + Apogee = Descent,
-        Descent + MainDeployment = Fuck,
-        Descent + DrogueDeployment = DrogueDescent,
-        DrogueDescent + MainDeployment = MainDescent,
-        MainDescent + NoMovement = Landed,
-        Fault + FaultCleared = _,
-        _ + FaultDetected = Fault,
-    }
-}
-
-pub struct TimeSink {
-    _marker: PhantomData<*const ()>,
-}
-
-impl TimeSink {
-    fn new() -> Self {
-        TimeSink {
-            _marker: PhantomData,
-        }
-    }
-}
-
-impl embedded_sdmmc::TimeSource for TimeSink {
-    fn get_timestamp(&self) -> embedded_sdmmc::Timestamp {
-        embedded_sdmmc::Timestamp {
-            year_since_1970: 0,
-            zero_indexed_month: 0,
-            zero_indexed_day: 0,
-            hours: 0,
-            minutes: 0,
-            seconds: 0,
-        }
-    }
-}
-
-// =================================================================================
-// Application Tasks
-// =================================================================================
-
-#[embassy_executor::task]
-async fn sm_task(spawner: Spawner, state_machine: StateMachine<Context>) {
-    info!("State Machine task started.");
-
-    loop {
-        match state_machine.state {
-            States::Ascent => {}
-            States::Fault => {}
-            States::Init => {}
-            States::WaitForLaunch => {}
-            States::Descent => {}
-            States::DrogueDescent => {}
-            States::Fuck => {}
-            States::Landed => {}
-            States::MainDescent => {}
-        }
-        Timer::after(Duration::from_millis(1000)).await;
-    }
-}
 
 // =================================================================================
 // Main Entry Point
@@ -304,10 +240,13 @@ async fn main(spawner: Spawner) {
     ch1.enable();
     music::play_song(&mut pwm, music::TWINKLE_MELODY, 130).await;
 
-    // // --- State Machine ---
-    // let state_machine = StateMachine::new(traits::Context {});
+    // --- State Machine ---
+    if features::ENABLE_STATE_MACHINE {
+        let state_machine = tasks::state_machine::StateMachine::new(traits::Context {});
+        spawner.must_spawn(tasks::state_machine::sm_task(spawner, state_machine));
+    }
 
-    // // --- Radio ---
+    // --- Radio ---
     let (mut radio_tx, mut radio_ring_rx) = board.setup_radio();
 
     // --- Inference ---
@@ -332,12 +271,8 @@ async fn main(spawner: Spawner) {
     }
     // pass control of the spawner to the state machine
     // spawner.must_spawn(tasks::state_machine::sm_task(spawner, state_machine));
-    // temporary: compilable stub task until Context satisfies StateMachineContext
-    // spawner.must_spawn(tasks::state_machine::sm_task_stub());
     if features::ENABLE_RADIO {
         spawner.must_spawn(comm::radio::radio_reader_task(radio_ring_rx));
         spawner.must_spawn(comm::radio::radio_writer_task(radio_tx));
     }
 }
-
-// See inference:: for the reference run_model helper moved from here.
