@@ -14,7 +14,6 @@ mod model;
 mod music;
 mod resources;
 mod sbg_manager;
-mod setup;
 mod tasks;
 mod traits;
 
