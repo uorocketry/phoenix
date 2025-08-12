@@ -29,7 +29,7 @@ impl Cameras {
         self.trigger_b.set_high();
         self.trigger_a.set_high();
         Delay.delay_ms(500);
-        self.trigger_b.set_low();
+        self.trigger_a.set_low();
         self.trigger_b.set_low();
     }
 

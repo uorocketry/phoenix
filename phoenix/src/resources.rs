@@ -42,7 +42,8 @@ pub static COMMAND_CHANNEL: Channel<
     messages_prost::command::command::Data,
     2,
 > = Channel::new();
-pub static RADIO_CHANNEL: Channel<CriticalSectionRawMutex, [u8; 255], 10> = Channel::new();
+pub static RADIO_CHANNEL: Channel<CriticalSectionRawMutex, [u8; RADIO_BUFFER_SIZE], 10> =
+    Channel::new();
 #[link_section = ".axisram.buffers"]
 pub static mut RX_SBG_BUF: [u8; SBG_BUFFER_SIZE] = [0; SBG_BUFFER_SIZE];
 

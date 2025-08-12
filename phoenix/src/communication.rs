@@ -41,136 +41,146 @@ pub async fn radio_reader_task(mut rx: RingBufferedUartRx<'static>) {
             if len > 0 {
                 // Process the received data
                 info!("Received {} bytes from radio: {:?}", len, &buf[..len]);
-                let (_header, msg): (_, MavMessage) = mavlink::read_versioned_msg(
+                if let Ok((_header, msg)) = mavlink::read_versioned_msg(
                     &mut PeekReader::new(&buf[..len]),
                     mavlink::MavlinkVersion::V2,
-                )
-                .unwrap();
-
-                match msg {
-                    mavlink::uorocketry::MavMessage::POSTCARD_MESSAGE(msg) => {
-                        info!("Received postcard message");
-                        // decode the msg
-                        if let Ok(recv) = messages_prost::radio::RadioFrame::decode_length_delimited(
-                            &mut &msg.message[..],
-                        ) {
-                            // info!("Received radio frame: {:?}", recv.node);
-                            if let Some(payload) = recv.payload {
-                                match payload {
-                                    Payload::Sbg(sbg_data) => {
-                                        info!("Received SBG data: {:?}", sbg_data.data.is_some());
-                                    }
-                                    Payload::Gps(gps_data) => {
-                                        info!("Received GPS data: {:?}", gps_data.data.len());
-                                        // Handle GPS data
-                                    }
-                                    Payload::Madgwick(madgwick_data) => {
-                                        info!(
-                                            "Received Madgwick data: {:?}",
-                                            madgwick_data.data.is_some()
-                                        );
-                                        // Handle Madgwick data
-                                    }
-                                    Payload::Iim20670(imu_data) => {
-                                        info!("Received IMU data: {:?}", imu_data.data.is_some());
-                                        // Handle IMU data
-                                    }
-                                    Payload::Log(log_data) => {
-                                        info!("Received Log data: {:?}", log_data.level);
-                                        // Handle Log data
-                                    }
-                                    Payload::State(state_message) => {
-                                        info!("Received State message: {:?}", state_message.state);
-                                        // Handle State message
-                                    }
-                                    Payload::Command(command) => {
-                                        info!("Received Command: {:?}", command.data.is_some());
-                                        if let Some(command_data) = command.data {
-                                            match command_data {
-                                                messages_prost::command::command::Data::Ping(ping) => {
-                                                    // info!("Received Ping command: {:?}", ping);
-                                                    info!("Ping");
-                                                    let mut buf: [u8; 255] = [0; 255];
-                                                    let msg = messages_prost::radio::RadioFrame {
-                                                        node: messages_prost::common::Node::Phoenix.into(),
-                                                        payload: Some(messages_prost::radio::radio_frame::Payload::Command(
-                                                            messages_prost::command::Command {
-                                                                node: 0,
-                                                                data: Some(messages_prost::command::command::Data::Pong(
-                                                                    messages_prost::command::Pong {
-                                                                        id: ping.id,
-                                                                    }
-                                                                )),
+                ) {
+                    match msg {
+                        mavlink::uorocketry::MavMessage::POSTCARD_MESSAGE(msg) => {
+                            info!("Received postcard message");
+                            // decode the msg
+                            if let Ok(recv) =
+                                messages_prost::radio::RadioFrame::decode_length_delimited(
+                                    &mut &msg.message[..],
+                                )
+                            {
+                                // info!("Received radio frame: {:?}", recv.node);
+                                if let Some(payload) = recv.payload {
+                                    match payload {
+                                        Payload::Sbg(sbg_data) => {
+                                            info!(
+                                                "Received SBG data: {:?}",
+                                                sbg_data.data.is_some()
+                                            );
+                                        }
+                                        Payload::Gps(gps_data) => {
+                                            info!("Received GPS data: {:?}", gps_data.data.len());
+                                            // Handle GPS data
+                                        }
+                                        Payload::Madgwick(madgwick_data) => {
+                                            info!(
+                                                "Received Madgwick data: {:?}",
+                                                madgwick_data.data.is_some()
+                                            );
+                                            // Handle Madgwick data
+                                        }
+                                        Payload::Iim20670(imu_data) => {
+                                            info!(
+                                                "Received IMU data: {:?}",
+                                                imu_data.data.is_some()
+                                            );
+                                            // Handle IMU data
+                                        }
+                                        Payload::Log(log_data) => {
+                                            info!("Received Log data: {:?}", log_data.level);
+                                            // Handle Log data
+                                        }
+                                        Payload::State(state_message) => {
+                                            info!(
+                                                "Received State message: {:?}",
+                                                state_message.state
+                                            );
+                                            // Handle State message
+                                        }
+                                        Payload::Command(command) => {
+                                            info!("Received Command: {:?}", command.data.is_some());
+                                            if let Some(command_data) = command.data {
+                                                match command_data {
+                                                    messages_prost::command::command::Data::Ping(ping) => {
+                                                        // info!("Received Ping command: {:?}", ping);
+                                                        info!("Ping");
+                                                        let mut buf: [u8; 255] = [0; 255];
+                                                        let msg = messages_prost::radio::RadioFrame {
+                                                            node: messages_prost::common::Node::Phoenix.into(),
+                                                            payload: Some(messages_prost::radio::radio_frame::Payload::Command(
+                                                                messages_prost::command::Command {
+                                                                    node: 0,
+                                                                    data: Some(messages_prost::command::command::Data::Pong(
+                                                                        messages_prost::command::Pong {
+                                                                            id: ping.id,
+                                                                        }
+                                                                    )),
+                                                                }
+                                                            ))
+                                                        };
+                                                        msg.encode_length_delimited(&mut buf.as_mut())
+                                                            .expect("Failed to encode SBG GPS Position");
+                                                        RADIO_CHANNEL.send(buf).await;
+                                                    }
+                                                    messages_prost::command::command::Data::Pong(pong) => {
+                                                        // info!("Received Pong command: {:?}", pong);
+                                                        info!("Pong");
+                                                    }
+                                                    messages_prost::command::command::Data::Online(online) => {
+                                                        // info!("Received Online command: {:?}", online);
+                                                    }
+                                                    messages_prost::command::command::Data::DeployDrogue(deploy_drogue) => {
+                                                        RECOVERY_MANAGER.lock(|cell| {
+                                                            // *cell.borrow_mut() = Some(recovery_manager);
+                                                            if let Some(recovery_manager) = cell.borrow_mut().as_mut() {
+                                                                recovery_manager.arm();
+                                                                recovery_manager.fire_drogue();
+                                                                recovery_manager.disarm();
+                                                            } else {
+                                                                info!("Recovery manager not initialized.");
                                                             }
-                                                        ))
-                                                    };
-                                                    msg.encode_length_delimited(&mut buf.as_mut())
-                                                        .expect("Failed to encode SBG GPS Position");
-                                                    RADIO_CHANNEL.send(buf).await;
-                                                }
-                                                messages_prost::command::command::Data::Pong(pong) => {
-                                                    // info!("Received Pong command: {:?}", pong);
-                                                    info!("Pong");
-                                                }
-                                                messages_prost::command::command::Data::Online(online) => {
-                                                    // info!("Received Online command: {:?}", online);
-                                                }
-                                                messages_prost::command::command::Data::DeployDrogue(deploy_drogue) => {
-                                                    RECOVERY_MANAGER.lock(|cell| {
-                                                        // *cell.borrow_mut() = Some(recovery_manager);
-                                                        if let Some(recovery_manager) = cell.borrow_mut().as_mut() {
-                                                            recovery_manager.arm();
-                                                            recovery_manager.fire_drogue();
-                                                            recovery_manager.disarm();
-                                                        } else {
-                                                            info!("Recovery manager not initialized.");
-                                                        }
-                                                    });
+                                                        });
 
-                                                    // COMMAND_CHANNEL.send(command_data).await;
-                                                    // info!("Received Deploy Drogue command: {:?}", deploy_drogue);
-                                                }
-                                                messages_prost::command::command::Data::DeployMain(deploy_main) => {
-                                                    RECOVERY_MANAGER.lock(|cell| {
-                                                        info!("Boom boom");
-                                                        // *cell.borrow_mut() = Some(recovery_manager);
-                                                        if let Some(recovery_manager) = cell.borrow_mut().as_mut() {
-                                                            recovery_manager.arm();
+                                                        // COMMAND_CHANNEL.send(command_data).await;
+                                                        // info!("Received Deploy Drogue command: {:?}", deploy_drogue);
+                                                    }
+                                                    messages_prost::command::command::Data::DeployMain(deploy_main) => {
+                                                        RECOVERY_MANAGER.lock(|cell| {
+                                                            info!("Boom boom");
+                                                            // *cell.borrow_mut() = Some(recovery_manager);
+                                                            if let Some(recovery_manager) = cell.borrow_mut().as_mut() {
+                                                                recovery_manager.arm();
                                                                 recovery_manager.fire_main();
-                                                            recovery_manager.disarm();
-                                                        } else {
-                                                            info!("Recovery manager not initialized.");
-                                                        }
-                                                    });
-                                                    // info!("Received Deploy Main command: {:?}", deploy_main);
-                                                    // COMMAND_CHANNEL.send(command_data).await;
+                                                                recovery_manager.disarm();
+                                                            } else {
+                                                                info!("Recovery manager not initialized.");
+                                                            }
+                                                        });
+                                                        // info!("Received Deploy Main command: {:?}", deploy_main);
+                                                        // COMMAND_CHANNEL.send(command_data).await;
 
-                                                }
-                                                messages_prost::command::command::Data::PowerDown(power_down) => {
-                                                    // info!("Received Power Down command: {:?}", power_down);
-                                                }
-                                                messages_prost::command::command::Data::RadioRateChange(rate_change) => {
-                                                    // info!("Received Radio Rate Change command: {:?}", rate_change);
+                                                    }
+                                                    messages_prost::command::command::Data::PowerDown(power_down) => {
+                                                        // info!("Received Power Down command: {:?}", power_down);
+                                                    }
+                                                    messages_prost::command::command::Data::RadioRateChange(rate_change) => {
+                                                        // info!("Received Radio Rate Change command: {:?}", rate_change);
+                                                    }
                                                 }
                                             }
+                                            // Handle Command
                                         }
-                                        // Handle Command
                                     }
                                 }
+                            } else {
+                                info!("Failed to decode radio frame.");
                             }
-                        } else {
-                            info!("Failed to decode radio frame.");
                         }
-                    }
-                    mavlink::uorocketry::MavMessage::COMMAND_MESSAGE(command) => {
-                        info!("Received command");
-                    }
-                    mavlink::uorocketry::MavMessage::HEARTBEAT(_) => {
-                        info!("Received heartbeat message.");
-                    }
-                    _ => {
-                        info!("Unknown mavlink message.");
-                        // info!("Received unknown MAVLink message: {:?}", msg);
+                        mavlink::uorocketry::MavMessage::COMMAND_MESSAGE(command) => {
+                            info!("Received command");
+                        }
+                        mavlink::uorocketry::MavMessage::HEARTBEAT(_) => {
+                            info!("Received heartbeat message.");
+                        }
+                        _ => {
+                            info!("Unknown mavlink message.");
+                            // info!("Received unknown MAVLink message: {:?}", msg);
+                        }
                     }
                 }
             }

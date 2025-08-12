@@ -104,7 +104,7 @@ impl RecoveryManager {
             self.arming.main_b.set_high();
 
             self.arming.drogue.set_high();
-            self.arming.main_b.set_high();
+            self.arming.drogue_b.set_high();
         }
     }
 
@@ -114,7 +114,7 @@ impl RecoveryManager {
         self.arming.main_b.set_low();
 
         self.arming.drogue.set_low();
-        self.arming.main_b.set_low();
+        self.arming.drogue_b.set_low();
     }
 
     pub fn fire_main(&mut self) {
