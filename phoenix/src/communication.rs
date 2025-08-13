@@ -92,6 +92,9 @@ pub async fn radio_reader_task(mut rx: RingBufferedUartRx<'static>) {
                                             );
                                             // Handle State message
                                         }
+                                        Payload::Barometer(barometer_data) => {
+                                            // Handle Barometer data
+                                        }
                                         Payload::Command(command) => {
                                             info!("Received Command: {:?}", command.data.is_some());
                                             if let Some(command_data) = command.data {
@@ -203,7 +206,6 @@ pub async fn radio_writer_task(mut tx: UartTx<'static, mode::Async>) {
         let mav_message = mavlink::uorocketry::MavMessage::POSTCARD_MESSAGE(
             mavlink::uorocketry::POSTCARD_MESSAGE_DATA { message: data },
         );
-        // info!("Writing radio message");
         mavlink::write_versioned_msg_async(
             &mut tx,
             mavlink::MavlinkVersion::V2,

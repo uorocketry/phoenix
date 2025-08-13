@@ -101,7 +101,7 @@ pub async fn setup_gps(
 }
 
 #[embassy_executor::task]
-async fn uart_gps_dma_reader_task(
+pub async fn uart_gps_dma_reader_task(
     mut gps_rx: RingBufferedUartRx<'static>,
     gps_tx: UartTx<'static, mode::Async>,
 ) {
@@ -123,6 +123,7 @@ async fn uart_gps_dma_reader_task(
         match res {
             Ok(strings) => {
                 info!("Result: {}", strings.as_str());
+                
             }
             _ => {
                 info!("nmea parser none found");

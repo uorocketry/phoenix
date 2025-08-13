@@ -11,6 +11,8 @@ use embedded_hal_1::delay::DelayNs;
 use embedded_hal_1::digital::OutputPin;
 use heapless::HistoryBuffer;
 use libm::powf;
+
+use crate::resources::PRESSURE_CHANNEL;
 // --- Boom Boom Setup ---
 /*
    MAIN_ARM/TEST = PD6
@@ -135,88 +137,160 @@ impl RecoveryManager {
 }
 
 #[embassy_executor::task]
-async fn recovery_algorithm_task(mut baro: Ms5611<Spi<'static, Blocking>, Output<'static>, Delay>) {
+pub async fn recovery_algorithm_task() {
     info!("Barometer reader task started.");
+    const SENSOR_TIMEOUT: Duration = Duration::from_millis(10_000);
     const MAIN_HEIGHT: f32 = GROUND_HEIGHT + 500.0; // meters ASL
     const HEIGHT_MIN: f32 = GROUND_HEIGHT + 300.0; // meters ASL
     const GROUND_HEIGHT: f32 = 300.0; // meters ASL
     const ASCENT_LOCKOUT: f32 = 0.1;
-    const DATA_POINTS: usize = 20;
-    const VALID_DESCENT_RATE: f32 = -0.005; // meters per millise
+    const DATA_POINTS: usize = 8;
+    const VALID_DESCENT_RATE: f32 = -5.0; // meters per millise
 
-    let mut historical_barometer_altitude: HistoryBuffer<(f32, Instant), 20> = HistoryBuffer::new();
+    let mut historical_barometer_altitude_sbg: HistoryBuffer<(f32, Instant), 8> = HistoryBuffer::new();
+    let mut historical_barometer_altitude_baro: HistoryBuffer<(f32, Instant), 8> = HistoryBuffer::new();
+
+    let mut ignore_baro = false;
+    let mut ignore_sbg = false;
 
     loop {
-        match baro.read_pressure_temperature(OversamplingRatio::Osr4096) {
-            Ok(reading) => {
+        let mut baro_apogee_detected = false;
+        let mut sbg_apogee_detected = false;
+
+        let reading: (f32, f32, u8, Instant) = PRESSURE_CHANNEL.receive().await;
+        // Hypsometric Formula
+        let mut altitude = 0.0; 
+        if reading.2 == 1 {
+            altitude =
+                ((powf(101.325 / reading.0, 1.0 / 5.257) - 1.0) * (reading.1 + 273.15)) / 0.0065;
+            info!("Baro Altitude data {}", altitude);
+            historical_barometer_altitude_baro.write((altitude, reading.3));
+
+        } else if reading.2 == 0 {
+            info!("SBG Altitude data {}", reading.0);
+            altitude = reading.0;
+            historical_barometer_altitude_sbg.write((altitude, reading.3));
+        }
+        
+
+        // Apogee detection logic
+        if historical_barometer_altitude_sbg.len() < 8 {
+            info!("not enough data points to detect apogee");
+            continue;
+        }
+
+        if historical_barometer_altitude_baro.len() < 8 {
+            info!("not enough data points to detect apogee");
+            continue;
+        }
+
+        let mut buf_sbg = historical_barometer_altitude_sbg.oldest_ordered();
+        let mut buf_baro = historical_barometer_altitude_baro.oldest_ordered();
+
+        if buf_sbg.last().unwrap().1.duration_since(buf_sbg.last().unwrap().1) > SENSOR_TIMEOUT {
+            ignore_sbg = true;
+        } else {
+            info!("SBG data is valid, proceeding with apogee detection");
+            ignore_sbg = false;
+        }
+
+        if buf_baro.last().unwrap().1.duration_since(buf_baro.last().unwrap().1) > SENSOR_TIMEOUT {
+            ignore_baro = true;
+        } else {
+            ignore_baro = false;
+        }
+
+        if let Some(mut prev_reading) = buf_baro.next() {
+            // `prev_reading` is now a tuple: (f32, Instant)
+            let mut avg_sum: f32 = 0.0;
+            let mut datapoints_used = 0;
+
+            for current_reading in buf_sbg {
+                // `current_reading` is also a tuple
+                // Calculate time diff between the actual measurement times.
+                // Convert from micros to seconds for a more standard rate unit (meters/sec).
+                let time_diff =
+                    current_reading.1.duration_since(prev_reading.1).as_millis();
+
                 // info!(
-                //     "Baro: Temp: {} C, Pressure: {} mbar",
-                //     reading.0, reading.1
+                //     "prev alt: {}, new alt: {}, time diff: {} ms",
+                //     prev_reading.0, current_reading.0, time_diff
                 // );
 
-                // Hypsometric Formula
-                let altitude =
-                    ((powf(101.325 / reading.1, 1.0 / 5.257) - 1.0) * (25.0 + 273.15)) / 0.0065;
-                historical_barometer_altitude.write((altitude, Instant::now()));
+                if time_diff == 0 {
+                    continue; // Avoid division by zero
+                }
 
-                // Apogee detection logic
-                if historical_barometer_altitude.len() < 8 {
-                    info!("not enough data points to detect apogee");
+                let slope = (current_reading.0 - prev_reading.0) / time_diff as f32;
+                // info!("Slope: {} m/ms", slope);
+                // Your existing logic for ascent lockout
+                if slope > ASCENT_LOCKOUT {
                     continue;
                 }
 
-                let mut buf = historical_barometer_altitude.oldest_ordered();
-                if let Some(mut prev_reading) = buf.next() {
-                    // `prev_reading` is now a tuple: (f32, Instant)
-                    let mut avg_sum: f32 = 0.0;
-                    let mut datapoints_used = 0;
+                avg_sum += slope;
+                datapoints_used += 1;
+                prev_reading = current_reading; // Update to the current reading for the next iteration
+            }
 
-                    for current_reading in buf {
-                        // `current_reading` is also a tuple
-                        // Calculate time diff between the actual measurement times.
-                        // Convert from micros to seconds for a more standard rate unit (meters/sec).
-                        let time_diff =
-                            current_reading.1.duration_since(prev_reading.1).as_millis();
-
-                        info!(
-                            "prev alt: {}, new alt: {}, time diff: {} ms",
-                            prev_reading.0, current_reading.0, time_diff
-                        );
-
-                        if time_diff == 0 {
-                            continue; // Avoid division by zero
-                        }
-
-                        let slope = (current_reading.0 - prev_reading.0) / time_diff as f32;
-                        // info!("Slope: {} m/ms", slope);
-                        // Your existing logic for ascent lockout
-                        if slope > ASCENT_LOCKOUT {
-                            continue;
-                        }
-
-                        avg_sum += slope;
-                        datapoints_used += 1;
-                        prev_reading = current_reading; // Update to the current reading for the next iteration
-                    }
-
-                    // Check if the average descent rate is valid
-                    if datapoints_used > 0 {
-                        let avg_slope = avg_sum / (datapoints_used as f32);
-                        // info!("Average slope: {} m/ms", avg_slope);
-                        if avg_slope <= VALID_DESCENT_RATE {
-                            info!(
-                                "Apogee detected! Average vertical speed: {} m/s",
-                                avg_slope * 1000.0
-                            );
-                            // todo!("Send Apogee event over events channel to state machine to process.");
-                        }
-                    }
+            // Check if the average descent rate is valid
+            if datapoints_used > 0 {
+                let avg_slope = avg_sum / (datapoints_used as f32);
+                // info!("Average slope: {} m/ms", avg_slope);
+                if avg_slope <= VALID_DESCENT_RATE {
+                    info!(
+                        "Apogee detected! Average vertical speed: {} m/s",
+                        avg_slope * 1000.0
+                    );
                 }
             }
-            Err(e) => {
-                // error!("Baro: Driver reading failed: {:?}", e);
-            }
         }
-        Timer::after(Duration::from_millis(100)).await;
+
+        if let Some(mut prev_reading) = buf_baro.next() {
+            // `prev_reading` is now a tuple: (f32, Instant)
+            let mut avg_sum: f32 = 0.0;
+            let mut datapoints_used = 0;
+
+            for current_reading in buf_baro {
+                // `current_reading` is also a tuple
+                // Calculate time diff between the actual measurement times.
+                // Convert from micros to seconds for a more standard rate unit (meters/sec).
+                let time_diff =
+                    current_reading.1.duration_since(prev_reading.1).as_millis();
+
+                // info!(
+                //     "prev alt: {}, new alt: {}, time diff: {} ms",
+                //     prev_reading.0, current_reading.0, time_diff
+                // );
+
+                if time_diff == 0 {
+                    continue; // Avoid division by zero
+                }
+
+                let slope = (current_reading.0 - prev_reading.0) / time_diff as f32;
+                // info!("Slope: {} m/ms", slope);
+                // Your existing logic for ascent lockout
+                if slope > ASCENT_LOCKOUT {
+                    continue;
+                }
+
+                avg_sum += slope;
+                datapoints_used += 1;
+                prev_reading = current_reading; // Update to the current reading for the next iteration
+            }
+
+            // Check if the average descent rate is valid
+            if datapoints_used > 0 {
+                let avg_slope = avg_sum / (datapoints_used as f32);
+                // info!("Average slope: {} m/ms", avg_slope);
+                if avg_slope <= VALID_DESCENT_RATE {
+                    info!(
+                        "Apogee detected! Average vertical speed: {} m/s",
+                        avg_slope * 1000.0
+                    );
+                }
+            }
+
+        }
     }
 }

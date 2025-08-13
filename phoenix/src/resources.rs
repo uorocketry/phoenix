@@ -31,7 +31,7 @@ pub const RADIO_BUFFER_SIZE: usize = 255;
 #[global_allocator]
 pub static HEAP: Heap = Heap::empty();
 
-pub static PRESSURE_SIGNAL: Signal<CriticalSectionRawMutex, (f32, u8, Instant)> = Signal::new();
+pub static PRESSURE_CHANNEL: Channel<CriticalSectionRawMutex, (f32, f32, u8, Instant), 10> = Channel::new();
 
 pub static SBG_CHANNEL: Channel<CriticalSectionRawMutex, SbgData, 10> = Channel::new();
 pub static BUFFER_CHANNEL: Channel<CriticalSectionRawMutex, DmaBuffer, 10> = Channel::new();

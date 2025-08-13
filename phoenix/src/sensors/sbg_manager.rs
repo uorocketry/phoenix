@@ -7,7 +7,7 @@ use core::ptr;
 // use crate::app::sbg_sd_task as sbg_sd;
 // use crate::app::sbg_write_data;
 use super::sbg_manager;
-use crate::resources::{BUFFER_CHANNEL, RADIO_CHANNEL, RTC, SBG_CHANNEL};
+use crate::resources::{BUFFER_CHANNEL, PRESSURE_CHANNEL, RADIO_CHANNEL, RTC, SBG_CHANNEL};
 use crate::HEAP;
 use chrono::NaiveDateTime;
 use defmt::info;
@@ -28,7 +28,7 @@ use sbg_rs::sbg::{CallbackData, SBG, SBG_BUFFER_SIZE};
 // use stm32h7xx_hal::serial::{Rx, Tx};
 
 #[embassy_executor::task]
-async fn uart_dma_reader_task(mut rx: RingBufferedUartRx<'static>) {
+pub async fn uart_dma_reader_task(mut rx: RingBufferedUartRx<'static>) {
     info!("DMA reader task spawned.");
     loop {
         let mut buf: [u8; SBG_BUFFER_SIZE] = [0; SBG_BUFFER_SIZE];
@@ -42,7 +42,7 @@ async fn uart_dma_reader_task(mut rx: RingBufferedUartRx<'static>) {
 }
 
 #[embassy_executor::task]
-async fn sbg_parser_task(tx: UartTx<'static, mode::Async>) {
+pub async fn sbg_parser_task(tx: UartTx<'static, mode::Async>) {
     let mut sbg = sbg_manager::SBGManager::new(tx);
     loop {
         let full_buffer = BUFFER_CHANNEL.receive().await;
@@ -51,7 +51,7 @@ async fn sbg_parser_task(tx: UartTx<'static, mode::Async>) {
 }
 
 #[embassy_executor::task]
-async fn sbg_receiver_task() {
+pub async fn sbg_receiver_task() {
     loop {
         let data = SBG_CHANNEL.receive().await;
         match data.data {
@@ -135,9 +135,12 @@ pub fn sbg_get_time() -> u32 {
 /// Publishes data to the SBG channel.
 pub fn sbg_handle_data(data: CallbackData) {
     match data {
-        CallbackData::Air(x) => SBG_CHANNEL.try_send(messages_prost::sensor::sbg::SbgData {
-            data: Some(messages_prost::sensor::sbg::sbg_data::Data::Air(x)),
-        }),
+        CallbackData::Air(x) => {
+            PRESSURE_CHANNEL.try_send((x.data.unwrap().altitude, x.data.unwrap().air_temperature, 0, embassy_time::Instant::now())); 
+            SBG_CHANNEL.try_send(messages_prost::sensor::sbg::SbgData {
+                data: Some(messages_prost::sensor::sbg::sbg_data::Data::Air(x)),
+            })
+        },
         CallbackData::EkfNav(x) => SBG_CHANNEL.try_send(messages_prost::sensor::sbg::SbgData {
             data: Some(messages_prost::sensor::sbg::sbg_data::Data::EkfNav(x)),
         }),

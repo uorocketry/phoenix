@@ -39,18 +39,6 @@ use crate::communication::{radio_reader_task, radio_writer_task};
 use crate::recovery::RecoveryManager;
 use crate::resources::{Irqs, HEAP, RECOVERY_MANAGER, RX_SBG_BUF};
 
-#[embassy_executor::task]
-async fn led_blinker_task(pin: peripherals::PB14) {
-    let mut led = Output::new(pin, Level::High, Speed::Low);
-    info!("LED blinker task started.");
-    loop {
-        led.set_high();
-        Timer::after_millis(500).await;
-        led.set_low();
-        Timer::after_millis(500).await;
-    }
-}
-
 // =================================================================================
 // Main Entry Point
 // =================================================================================
@@ -110,7 +98,7 @@ async fn main(spawner: Spawner) {
     info!("Heap usage: {} bytes", HEAP.used());
 
     // --- IMU Setup ---
-    let imu = sensors::imu::init_imu(p.SPI3, p.PC10, p.PB5, p.PB4, p.PC0, p.PB6, p.PD4);
+    // let imu = sensors::imu::init_imu(p.SPI3, p.PC10, p.PB5, p.PB4, p.PC0, p.PB6, p.PD4);
 
     // --- SBG Setup ---
     let mut uart_config = UartConfig::default();
@@ -185,16 +173,15 @@ async fn main(spawner: Spawner) {
         communication::init_radio(p.UART7, p.PE7, p.PE8, p.DMA2_CH3, p.DMA2_CH5, Irqs);
 
     // --- Spawning Tasks ---
-    // spawner.must_spawn(led_blinker_task(p.PB14));
-
-    // spawner.must_spawn(uart_dma_reader_task(ring_rx));
+    spawner.must_spawn(sensors::sbg_manager::uart_dma_reader_task(ring_rx));
     // spawner.must_spawn(uart_gps_dma_reader_task(ring_gps_rx, gps_tx));
-    // spawner.must_spawn(sbg_parser_task(tx));
-    // spawner.must_spawn(sbg_receiver_task());
-    // spawner.must_spawn(baro_reader_task(baro));
+    spawner.must_spawn(sensors::sbg_manager::sbg_parser_task(tx));
+    spawner.must_spawn(sensors::sbg_manager::sbg_receiver_task());
+    spawner.must_spawn(sensors::baro::baro_reader_task(baro));
     // spawner.must_spawn(ai_task());
     // pass control of the spawner to the state machine
     // spawner.must_spawn(sm_task(spawner, state_machine));
     spawner.must_spawn(radio_reader_task(radio_ring_rx));
     spawner.must_spawn(radio_writer_task(radio_tx));
+    spawner.must_spawn(recovery::recovery_algorithm_task());
 }
