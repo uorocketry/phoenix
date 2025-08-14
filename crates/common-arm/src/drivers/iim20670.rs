@@ -408,7 +408,7 @@ impl ImuConfigBuilder {
 
 /// Comprehensive error type for IMU operations
 #[derive(Debug)]
-pub enum Error<SPIE, CSE, INTE> {
+pub enum Error<SPIE, CSE> {
     /// SPI communication error
     Spi(SPIE),
     /// Chip select pin error  
@@ -554,7 +554,7 @@ impl<'a, CS: OutputPin> Drop for CsGuard<'a, CS> {
 }
 
 /// Enhanced IIM20670 IMU Driver with full datasheet compliance
-pub struct Iim20670<SPI, CS, DELAY, INT = ()> {
+pub struct Iim20670<SPI, CS, DELAY = ()> {
     spi: SPI,
     cs: CS,
     delay: DELAY,
@@ -565,14 +565,14 @@ pub struct Iim20670<SPI, CS, DELAY, INT = ()> {
     odr_enabled: bool,
 }
 
-impl<SPI, CS, DELAY, INT, SPIE, CSE, INTE> Iim20670<SPI, CS, DELAY, INT>
+impl<SPI, CS, DELAY, SPIE, CSE> Iim20670<SPI, CS, DELAY>
 where
     SPI: SpiDevice<Error = SPIE>,
     CS: OutputPin<Error = CSE>,
     DELAY: DelayNs,
 {
     /// Create IMU with default configuration
-    pub fn new(spi: SPI, cs: CS, delay: DELAY) -> Result<Self, Error<SPIE, CSE, INTE>> {
+    pub fn new(spi: SPI, cs: CS, delay: DELAY) -> Result<Self, Error<SPIE, CSE>> {
         Self::with_config(spi, cs, delay, ImuConfig::default())
     }
     
@@ -582,7 +582,7 @@ where
         mut cs: CS, 
         mut delay: DELAY, 
         config: ImuConfig
-    ) -> Result<Self, Error<SPIE, CSE, INTE>> {
+    ) -> Result<Self, Error<SPIE, CSE>> {
         // Initialize CS pin and wait for device ready
         cs.set_high().map_err(Error::Cs)?;
         delay.delay_ns(config.startup_delay_ms * 1_000_000); // Convert ms to ns
@@ -600,7 +600,7 @@ where
     }
 
     /// Initialize the IMU according to configuration
-    fn initialize(&mut self) -> Result<(), Error<SPIE, CSE, INTE>> {
+    fn initialize(&mut self) -> Result<(), Error<SPIE, CSE>> {
         // Perform soft reset
         self.reset()?;
         
@@ -632,7 +632,7 @@ where
     }
 
     /// Perform SPI transaction with retry logic and CRC validation (Section 5.2)
-    fn spi_transaction_with_retry(&mut self, reg: u8, data: u16, is_write: bool) -> Result<u16, Error<SPIE, CSE, INTE>> {
+    fn spi_transaction_with_retry(&mut self, reg: u8, data: u16, is_write: bool) -> Result<u16, Error<SPIE, CSE>> {
         let mut retries = 0;
         
         loop {
@@ -654,7 +654,7 @@ where
     }
 
     /// Perform SPI transaction with CRC validation (Section 5.2)
-    fn spi_transaction(&mut self, reg: u8, data: u16, is_write: bool) -> Result<u16, Error<SPIE, CSE, INTE>> {
+    fn spi_transaction(&mut self, reg: u8, data: u16, is_write: bool) -> Result<u16, Error<SPIE, CSE>> {
         let _guard = CsGuard::new(&mut self.cs, &mut self.delay).map_err(Error::Cs)?;
 
         // Build 32-bit SPI frame as per Section 5.1
@@ -668,7 +668,7 @@ where
         ]).map_err(Error::Spi)?;
 
         // Validate response status (Table 13)
-        self.check_return_status(frame[0])?;
+        Self::check_return_status(frame[0])?;
         
         // Validate CRC if this is a read operation (Section 5.2)
         if !is_write {
@@ -710,7 +710,7 @@ where
     }
 
     /// Check SPI return status (Table 13)
-    fn check_return_status(&self, status: u8) -> Result<(), Error<SPIE, CSE, INTE>> {
+    fn check_return_status(status: u8) -> Result<(), Error<SPIE, CSE>> {
         let rs_bits = (status >> 1) & 0x03;
         match rs_bits {
             0b00 => Err(Error::SpiTransferError(0)), // Reserved
@@ -722,20 +722,20 @@ where
     }
 
     /// Read register with bank switching
-    fn read_register(&mut self, bank: u8, reg: u8) -> Result<u16, Error<SPIE, CSE, INTE>> {
+    fn read_register(&mut self, bank: u8, reg: u8) -> Result<u16, Error<SPIE, CSE>> {
         self.switch_bank(bank)?;
         self.spi_transaction_with_retry(reg, 0, false)
     }
 
     /// Write register with bank switching
-    fn write_register(&mut self, bank: u8, reg: u8, data: u16) -> Result<(), Error<SPIE, CSE, INTE>> {
+    fn write_register(&mut self, bank: u8, reg: u8, data: u16) -> Result<(), Error<SPIE, CSE>> {
         self.switch_bank(bank)?;
         self.spi_transaction_with_retry(reg, data, true)?;
         Ok(())
     }
 
     /// Switch to specified bank
-    fn switch_bank(&mut self, bank: u8) -> Result<(), Error<SPIE, CSE, INTE>> {
+    fn switch_bank(&mut self, bank: u8) -> Result<(), Error<SPIE, CSE>> {
         if bank > 7 {
             return Err(Error::InvalidBank(bank));
         }
@@ -757,7 +757,7 @@ where
     }
 
     /// Unlock banks for access (Section 6.13)
-    fn unlock_banks(&mut self) -> Result<(), Error<SPIE, CSE, INTE>> {
+    fn unlock_banks(&mut self) -> Result<(), Error<SPIE, CSE>> {
         // Write tcode_status sequence: 010→001→100
         self.write_register(0, registers::MODE, 0x0002)?; // 010
         self.write_register(0, registers::MODE, 0x0001)?; // 001  
@@ -768,7 +768,7 @@ where
     }
 
     /// Unlock full-scale configuration (Section 6.17)
-    fn unlock_full_scale(&mut self) -> Result<(), Error<SPIE, CSE, INTE>> {
+    fn unlock_full_scale(&mut self) -> Result<(), Error<SPIE, CSE>> {
         for &unlock_cmd in &constants::FS_UNLOCK_SEQUENCE {
             let reg = ((unlock_cmd >> 24) & 0x1F) as u8;
             let data = (unlock_cmd & 0xFFFF) as u16;
@@ -780,7 +780,7 @@ where
     }
 
     /// Perform soft reset (Section 6.12)
-    fn reset(&mut self) -> Result<(), Error<SPIE, CSE, INTE>> {
+    fn reset(&mut self) -> Result<(), Error<SPIE, CSE>> {
         // Soft reset
         self.write_register(0, registers::RESET_CONTROL, 0x0002)?;
         self.delay.delay_ns(constants::RESET_TIME_MS * 1_000_000);
@@ -795,7 +795,7 @@ where
     }
 
     /// Verify device ID (Section 6.14)
-    fn verify_device_id(&mut self) -> Result<(), Error<SPIE, CSE, INTE>> {
+    fn verify_device_id(&mut self) -> Result<(), Error<SPIE, CSE>> {
         let device_id = self.read_register(1, registers::WHO_AM_I)? as u8;
         if device_id != constants::DEVICE_ID {
             return Err(Error::InvalidDeviceId { 
@@ -807,7 +807,7 @@ where
     }
 
     /// Verify fixed value register (Section 6.6)
-    fn verify_fixed_value(&mut self) -> Result<(), Error<SPIE, CSE, INTE>> {
+    fn verify_fixed_value(&mut self) -> Result<(), Error<SPIE, CSE>> {
         let fixed_value = self.read_register(0, registers::FIXED_VALUE)?;
         if fixed_value != constants::FIXED_VALUE_EXPECTED {
             return Err(Error::InvalidFixedValue { 
@@ -819,7 +819,7 @@ where
     }
 
     /// Set gyroscope full-scale range (Bank 7, register 0x14)
-    fn set_gyro_full_scale(&mut self, scale: GyroFullScale) -> Result<(), Error<SPIE, CSE, INTE>> {
+    fn set_gyro_full_scale(&mut self, scale: GyroFullScale) -> Result<(), Error<SPIE, CSE>> {
         // Read current register value to preserve other bits
         let current_val = self.read_register(7, registers::GYRO_FS_SEL)?;
         let new_val = (current_val & 0xFFF0) | (scale.to_register_value() as u16 & 0x000F);
@@ -828,7 +828,7 @@ where
     }
 
     /// Set accelerometer full-scale range (Bank 6, register 0x14)
-    fn set_accel_full_scale(&mut self, scale: AccelFullScale) -> Result<(), Error<SPIE, CSE, INTE>> {
+    fn set_accel_full_scale(&mut self, scale: AccelFullScale) -> Result<(), Error<SPIE, CSE>> {
         // Read current register value to preserve other bits  
         let current_val = self.read_register(6, registers::ACCEL_FS_SEL)?;
         let new_val = (current_val & 0xFFF8) | (scale.to_register_value() as u16 & 0x0007);
@@ -837,7 +837,7 @@ where
     }
 
     /// Configure digital filters (Tables 14-16)
-    fn configure_filters(&mut self, config: FilterConfig) -> Result<(), Error<SPIE, CSE, INTE>> {
+    fn configure_filters(&mut self, config: FilterConfig) -> Result<(), Error<SPIE, CSE>> {
         // The filter configuration in IIM-20670 is very complex with specific bit patterns
         // for each gyro+accel combination. For now, use safe defaults and warn about limitations.
         
@@ -857,7 +857,7 @@ where
     }
 
     /// Run self-test procedure (Sections 5.3-5.4)
-    fn run_self_test(&mut self) -> Result<SelfTestResults, Error<SPIE, CSE, INTE>> {
+    fn run_self_test(&mut self) -> Result<SelfTestResults, Error<SPIE, CSE>> {
         // Enable self-test
         self.write_register(1, registers::EN_ACCEL_SELFTEST, 0x0800)?; // Set bit 11
         self.write_register(1, registers::EN_GYRO_SELFTEST, 0x1000)?;  // Set bit 12
@@ -887,7 +887,7 @@ where
     }
 
     /// Test accelerometer self-test (Section 5.3)
-    fn test_accelerometer(&mut self) -> Result<(i16, i16, i16), Error<SPIE, CSE, INTE>> {
+    fn test_accelerometer(&mut self) -> Result<(i16, i16, i16), Error<SPIE, CSE>> {
         // Positive stimulus (+3g)
         self.write_register(0, registers::SELF_TEST, 0x0008)?; // accel_dc_trigger[1:0] = 01
         self.delay.delay_ns(constants::SELF_TEST_SETTLE_TIME_MS * 1_000_000);
@@ -912,7 +912,7 @@ where
     }
 
     /// Test gyroscope self-test (Section 5.4)
-    fn test_gyroscope(&mut self) -> Result<(i16, i16, i16), Error<SPIE, CSE, INTE>> {
+    fn test_gyroscope(&mut self) -> Result<(i16, i16, i16), Error<SPIE, CSE>> {
         // Positive stimulus (+110dps)
         self.write_register(0, registers::SELF_TEST, 0x0080)?; // gyro_dc_trigger[1:0] = 01
         self.delay.delay_ns(constants::SELF_TEST_SETTLE_TIME_MS * 1_000_000);
@@ -937,7 +937,7 @@ where
     }
 
     /// Validate self-test results against limits
-    fn validate_self_test_results(&self, accel: &(i16, i16, i16), gyro: &(i16, i16, i16)) -> Result<bool, Error<SPIE, CSE, INTE>> {
+    fn validate_self_test_results(&self, accel: &(i16, i16, i16), gyro: &(i16, i16, i16)) -> Result<bool, Error<SPIE, CSE>> {
         // Check accelerometer results
         let accel_x_ok = accel.0.abs() >= self_test_limits::ACCEL_MIN_DIFF && 
                         accel.0.abs() <= self_test_limits::ACCEL_MAX_DIFF;
@@ -1008,14 +1008,14 @@ where
     }
 
     /// Lock configuration to prevent unwanted changes
-    fn lock_configuration(&mut self) -> Result<(), Error<SPIE, CSE, INTE>> {
+    fn lock_configuration(&mut self) -> Result<(), Error<SPIE, CSE>> {
         // Set register write lock (Section 6.13)
         self.write_register(0, registers::MODE, 0x8000)?; // Set bit 15
         Ok(())
     }
 
     /// Read complete sensor measurement
-    pub fn read_measurement(&mut self) -> Result<ImuMeasurement, Error<SPIE, CSE, INTE>> {
+    pub fn read_measurement(&mut self) -> Result<ImuMeasurement, Error<SPIE, CSE>> {
         let gyro_x_raw = self.read_register(0, registers::GYRO_X_DATA)? as i16;
         let gyro_y_raw = self.read_register(0, registers::GYRO_Y_DATA)? as i16;
         let gyro_z_raw = self.read_register(0, registers::GYRO_Z_DATA)? as i16;
@@ -1058,7 +1058,7 @@ where
     }
 
     /// Read low-resolution accelerometer data
-    pub fn read_accel_lr(&mut self) -> Result<AccelerationLr, Error<SPIE, CSE, INTE>> {
+    pub fn read_accel_lr(&mut self) -> Result<AccelerationLr, Error<SPIE, CSE>> {
         let accel_x_raw = self.read_register(0, registers::ACCEL_X_DATA_LR)? as i16;
         let accel_y_raw = self.read_register(0, registers::ACCEL_Y_DATA_LR)? as i16;
         let accel_z_raw = self.read_register(0, registers::ACCEL_Z_DATA_LR)? as i16;
@@ -1073,7 +1073,7 @@ where
     }
 
     /// Enable ODR output on pin 12 (Section 4.11)
-    pub fn enable_odr_output(&mut self) -> Result<(), Error<SPIE, CSE, INTE>> {
+    pub fn enable_odr_output(&mut self) -> Result<(), Error<SPIE, CSE>> {
         // Unlock ODR configuration
         for &unlock_cmd in &constants::ODR_UNLOCK_SEQUENCE {
             let reg = ((unlock_cmd >> 24) & 0x1F) as u8;
@@ -1099,7 +1099,7 @@ where
     }
 
     /// Check if device is ready for data reading
-    pub fn is_ready(&mut self) -> Result<bool, Error<SPIE, CSE, INTE>> {
+    pub fn is_ready(&mut self) -> Result<bool, Error<SPIE, CSE>> {
         // Read any register to check SPI communication
         match self.read_register(0, registers::FIXED_VALUE) {
             Ok(_) => Ok(true),
