@@ -5,6 +5,7 @@
 use crate::recovery;
 use crate::state_machine::Events;
 use burn::backend::NdArray;
+use common_arm::drivers::iim20670::ImuMeasurement;
 use core::cell::RefCell;
 use embassy_stm32::rtc::Rtc;
 use embassy_stm32::spi::Spi;
@@ -34,6 +35,7 @@ pub static HEAP: Heap = Heap::empty();
 pub static PRESSURE_CHANNEL: Channel<CriticalSectionRawMutex, (f32, f32, u8, Instant), 10> = Channel::new();
 
 pub static SBG_CHANNEL: Channel<CriticalSectionRawMutex, SbgData, 10> = Channel::new();
+pub static IMU_CHANNEL: Channel<CriticalSectionRawMutex, ImuMeasurement, 10> = Channel::new();
 pub static BUFFER_CHANNEL: Channel<CriticalSectionRawMutex, DmaBuffer, 10> = Channel::new();
 pub static EVENT_CHANNEL: Channel<CriticalSectionRawMutex, Events, 2> = Channel::new();
 

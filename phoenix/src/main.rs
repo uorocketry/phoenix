@@ -99,6 +99,36 @@ async fn main(spawner: Spawner) {
 
     // --- IMU Setup ---
     // let imu = sensors::imu::init_imu(p.SPI3, p.PC10, p.PB5, p.PB4, p.PC0, p.PB6, p.PD4);
+    use common_arm::drivers::iim20670::{Iim20670, ImuConfig, GyroFullScale, AccelFullScale, FilterConfig};
+
+    let mut imu_spi_config = SpiConfig::default();
+    imu_spi_config.frequency = mhz(10); // IIM20670 max frequency
+    imu_spi_config.mode = embassy_stm32::spi::Mode {
+        polarity: embassy_stm32::spi::Polarity::IdleLow,
+        phase: embassy_stm32::spi::Phase::CaptureOnFirstTransition,
+    };
+
+    let imu_spi_bus = Spi::new_blocking(p.SPI3, p.PC10, p.PB5, p.PB4, imu_spi_config);
+    info!("IMU SPI bus configured.");
+
+    let imu_cs = Output::new(p.PB6, Level::High, Speed::Low);
+    let imu_reset = Output::new(p.PD4, Level::High, Speed::Low);
+    info!("IMU pins configured.");
+
+    // Configure IMU settings
+    let imu_config = ImuConfig::default()
+        .gyro_scale(GyroFullScale::Dps655)        // ±655 degrees/second
+        .accel_scale(AccelFullScale::G16)         // ±16g
+        .filters(FilterConfig::default())         // Default filter settings
+        .enable_self_test();                      // Run self-test during init
+
+    // Create the IMU driver
+    let imu = Iim20670::with_config(imu_spi_bus, imu_cs, Delay, imu_config)
+        .expect("Failed to initialize IMU");
+    info!("IMU initialized successfully.");
+
+    // Later in spawning section:
+    spawner.must_spawn(sensors::imu::imu_reader_task(imu));
 
     // --- SBG Setup ---
     let mut uart_config = UartConfig::default();
