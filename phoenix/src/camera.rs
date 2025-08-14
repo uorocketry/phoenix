@@ -19,16 +19,16 @@ impl Cameras {
 
     pub fn start_recording(&mut self) {
         // power on
-        self.trigger_b.set_high();
-        self.trigger_a.set_high();
-        Delay.delay_ms(2_000);
-        self.trigger_a.set_low();
-        self.trigger_b.set_low();
-        Delay.delay_ms(1000);
+        // self.trigger_b.set_high();
+        // self.trigger_a.set_high();
+        // Delay.delay_ms(2_000);
+        // self.trigger_a.set_low();
+        // self.trigger_b.set_low();
+        // Delay.delay_ms(1000);
         // trigger the camera
         self.trigger_b.set_high();
         self.trigger_a.set_high();
-        Delay.delay_ms(500);
+        Delay.delay_ms(10);
         self.trigger_a.set_low();
         self.trigger_b.set_low();
     }
@@ -36,7 +36,7 @@ impl Cameras {
     pub fn stop_recording(&mut self) {
         self.trigger_b.set_high();
         self.trigger_a.set_high();
-        Delay.delay_ms(500);
+        Delay.delay_ms(10);
         self.trigger_a.set_low();
         self.trigger_b.set_low();
         Delay.delay_ms(1000);

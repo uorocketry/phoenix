@@ -143,7 +143,7 @@ pub async fn recovery_algorithm_task() {
     const MAIN_HEIGHT: f32 = GROUND_HEIGHT + 500.0; // meters ASL
     const HEIGHT_MIN: f32 = GROUND_HEIGHT + 300.0; // meters ASL
     const GROUND_HEIGHT: f32 = 300.0; // meters ASL
-    const ASCENT_LOCKOUT: f32 = 0.1;
+    const ASCENT_LOCKOUT: f32 = 100.0;
     const DATA_POINTS: usize = 8;
     const VALID_DESCENT_RATE: f32 = -5.0; // meters per millise
 
@@ -163,11 +163,11 @@ pub async fn recovery_algorithm_task() {
         if reading.2 == 1 {
             altitude =
                 ((powf(101.325 / reading.0, 1.0 / 5.257) - 1.0) * (reading.1 + 273.15)) / 0.0065;
-            info!("Baro Altitude data {}", altitude);
+            info!("Baro Altitude data {}, {}", altitude, reading.3);
             historical_barometer_altitude_baro.write((altitude, reading.3));
 
         } else if reading.2 == 0 {
-            info!("SBG Altitude data {}", reading.0);
+            info!("SBG Altitude data {}, {}", reading.0, reading.3);
             altitude = reading.0;
             historical_barometer_altitude_sbg.write((altitude, reading.3));
         }
@@ -187,18 +187,18 @@ pub async fn recovery_algorithm_task() {
         let mut buf_sbg = historical_barometer_altitude_sbg.oldest_ordered();
         let mut buf_baro = historical_barometer_altitude_baro.oldest_ordered();
 
-        if buf_sbg.last().unwrap().1.duration_since(buf_sbg.last().unwrap().1) > SENSOR_TIMEOUT {
-            ignore_sbg = true;
-        } else {
-            info!("SBG data is valid, proceeding with apogee detection");
-            ignore_sbg = false;
-        }
+        // if buf_sbg.last().unwrap().1.duration_since(buf_sbg.last().unwrap().1) > SENSOR_TIMEOUT {
+        //     ignore_sbg = true;
+        // } else {
+        //     info!("SBG data is valid, proceeding with apogee detection");
+        //     ignore_sbg = false;
+        // }
 
-        if buf_baro.last().unwrap().1.duration_since(buf_baro.last().unwrap().1) > SENSOR_TIMEOUT {
-            ignore_baro = true;
-        } else {
-            ignore_baro = false;
-        }
+        // if buf_baro.last().unwrap().1.duration_since(buf_baro.last().unwrap().1) > SENSOR_TIMEOUT {
+        //     ignore_baro = true;
+        // } else {
+        //     ignore_baro = false;
+        // }
 
         if let Some(mut prev_reading) = buf_baro.next() {
             // `prev_reading` is now a tuple: (f32, Instant)
@@ -234,12 +234,12 @@ pub async fn recovery_algorithm_task() {
             }
 
             // Check if the average descent rate is valid
-            if datapoints_used > 0 {
+            if datapoints_used >= DATA_POINTS / 2 {
                 let avg_slope = avg_sum / (datapoints_used as f32);
                 // info!("Average slope: {} m/ms", avg_slope);
                 if avg_slope <= VALID_DESCENT_RATE {
                     info!(
-                        "Apogee detected! Average vertical speed: {} m/s",
+                        "SBG Apogee detected! Average vertical speed: {} m/s",
                         avg_slope * 1000.0
                     );
                 }
@@ -280,12 +280,12 @@ pub async fn recovery_algorithm_task() {
             }
 
             // Check if the average descent rate is valid
-            if datapoints_used > 0 {
+            if datapoints_used >= DATA_POINTS / 2 {
                 let avg_slope = avg_sum / (datapoints_used as f32);
                 // info!("Average slope: {} m/ms", avg_slope);
                 if avg_slope <= VALID_DESCENT_RATE {
                     info!(
-                        "Apogee detected! Average vertical speed: {} m/s",
+                        "Baro Apogee detected! Average vertical speed: {} m/s",
                         avg_slope * 1000.0
                     );
                 }

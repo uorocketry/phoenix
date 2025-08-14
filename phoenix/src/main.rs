@@ -23,7 +23,8 @@ use embassy_stm32::spi::{Config as SpiConfig, Spi};
 use embassy_stm32::time::{khz, mhz};
 use embassy_stm32::timer::simple_pwm::{PwmPin, SimplePwm};
 use embassy_stm32::usart::{Config as UartConfig, Uart};
-use embassy_time::{Delay, Timer};
+use embassy_time::{Delay, Duration, Timer};
+use embedded_hal_1::delay::DelayNs;
 use embedded_hal_1::digital::OutputPin;
 // use embedded_alloc::Heap;
 use crate::state_machine::StateMachine;
@@ -146,7 +147,12 @@ async fn main(spawner: Spawner) {
     });
 
     // --- Camera Triggers ---
-    let cameras = Cameras::new(p.PE14, p.PE12);
+    let mut cameras = Cameras::new(p.PE14, p.PE12);
+
+    // cameras.start_recording();
+    // Delay.delay_ms(10_000);
+    // cameras.stop_recording();
+    // info!("Camera recording started and stopped.");
 
     // --- Buzzer 🐝 ---
     let buzz_out_pin = PwmPin::new_ch1(p.PC6, OutputType::PushPull);
@@ -181,7 +187,7 @@ async fn main(spawner: Spawner) {
     // spawner.must_spawn(ai_task());
     // pass control of the spawner to the state machine
     // spawner.must_spawn(sm_task(spawner, state_machine));
-    spawner.must_spawn(radio_reader_task(radio_ring_rx));
+    // spawner.must_spawn(radio_reader_task(radio_ring_rx));
     spawner.must_spawn(radio_writer_task(radio_tx));
     spawner.must_spawn(recovery::recovery_algorithm_task());
 }
