@@ -56,7 +56,7 @@ pub static mut RX_RADIO_BUF: [u8; SBG_BUFFER_SIZE] = [0; SBG_BUFFER_SIZE];
 pub static mut RX_GPS_BUF: [u8; GPS_BUFFER_SIZE] = [0; GPS_BUFFER_SIZE];
 // The SPI bus is protected by a Mutex, so the RefCell is not needed.
 pub static SPI_BUS: StaticCell<
-    embassy_sync::mutex::Mutex<CriticalSectionRawMutex, Spi<mode::Async>>,
+    embassy_sync::mutex::Mutex<CriticalSectionRawMutex, Spi<mode::Blocking>>,
 > = StaticCell::new();
 pub static SPI_BUS_CELL: StaticCell<RefCell<Spi<mode::Blocking>>> = StaticCell::new();
 

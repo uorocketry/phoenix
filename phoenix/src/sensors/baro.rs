@@ -7,7 +7,7 @@ use embassy_time::Instant;
 use embassy_time::{Delay, Duration, Timer};
 use messages_prost::prost::Message;
 
-use crate::resources::RADIO_CHANNEL;
+use crate::resources::{RADIO_CHANNEL, SD_CHANNEL};
 use crate::resources::PRESSURE_CHANNEL;
 
 #[embassy_executor::task]
@@ -33,7 +33,8 @@ pub async fn baro_reader_task(mut baro: Ms5611<Spi<'static, Blocking>, Output<'s
                 };
                 msg.encode_length_delimited(&mut buf.as_mut())
                     .expect("Failed to encode SBG GPS Position");
-                RADIO_CHANNEL.send(buf).await;
+                RADIO_CHANNEL.send(buf.clone()).await;
+                SD_CHANNEL.send(("baro.txt", buf)).await; 
             }
             Err(e) => {
                 error!("Baro: Driver reading failed");

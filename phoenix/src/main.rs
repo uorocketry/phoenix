@@ -175,7 +175,7 @@ async fn main(spawner: Spawner) {
         >,
         Delay,
     > = sd::setup_sdmmc_interface(p.SPI1, p.PA5, p.PA7, p.PA6, p.PE9);
-
+    
     // --- GPS Setup ---
     let (ring_gps_rx, gps_tx) = sensors::gps::setup_gps(
         p.PA4, p.PB2, p.UART8, p.PE0, p.PE1, p.DMA1_CH5, p.DMA1_CH6, Irqs,
@@ -239,22 +239,4 @@ async fn main(spawner: Spawner) {
 
     // pass control of the spawner to the state machine
     spawner.must_spawn(state_machine::sm_task(spawner, state_machine));
-
-    // EVENT_CHANNEL
-    //     .send(crate::state_machine::Events::Start)
-    //     .await;
-
-    // let mut buf: [u8; 255] = [0; 255];
-
-    // // let msg = messages_prost::radio::RadioFrame {
-    // //     node: messages_prost::common::Node::Phoenix.into(),
-    // //     payload: Some(messages_prost::radio::radio_frame::Payload::Event(
-    // //         Event::Start.into(),
-    // //     )),
-    // //     millis_since_start: Instant::now().as_millis()
-    // // };
-    // // msg.encode_length_delimited(&mut buf.as_mut()).unwrap();
-    // // RADIO_CHANNEL.send(buf.clone()).await;
-    // // SD_CHANNEL.send(("state.txt", buf)).await;
-    // // info!("Ascent");
 }

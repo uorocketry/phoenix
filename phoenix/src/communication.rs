@@ -57,6 +57,15 @@ pub async fn radio_reader_task(mut rx: RingBufferedUartRx<'static>) {
                                 // info!("Received radio frame: {:?}", recv.node);
                                 if let Some(payload) = recv.payload {
                                     match payload {
+                                        Payload::ArgusTemperature(_) => {
+                                            
+                                        }
+                                        Payload::ArgusStrain(_) => {
+
+                                        }
+                                        Payload::ArgusPressure(_) => {
+
+                                        }
                                         Payload::ArgusEvent(_) => {
 
                                         }
