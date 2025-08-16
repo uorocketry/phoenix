@@ -1,12 +1,11 @@
 use defmt::info;
 use embassy_executor::Spawner;
-use embassy_time::{Delay, Duration, Timer};
-use embedded_hal_1::delay::DelayNs;
-use messages_prost::state::{State};
+use embassy_time::Instant;
+use messages_prost::phoenix_state::{Event, State};
 use smlang::statemachine;
 use messages_prost::prost::Message;
 
-use crate::resources::{EVENT_CHANNEL, PRESSURE_CHANNEL, RADIO_CHANNEL, RECOVERY_MANAGER};
+use crate::resources::{EVENT_CHANNEL, PRESSURE_CHANNEL, RADIO_CHANNEL, RECOVERY_MANAGER, SD_CHANNEL};
 
 statemachine! {
     transitions: {
@@ -58,12 +57,14 @@ pub async fn sm_task(spawner: Spawner, mut state_machine: StateMachine<Context>)
 
                 let msg = messages_prost::radio::RadioFrame {
                     node: messages_prost::common::Node::Phoenix.into(),
-                    payload: Some(messages_prost::radio::radio_frame::Payload::State(
+                    payload: Some(messages_prost::radio::radio_frame::Payload::PhoenixState(
                         State::Ascent.into(),
                     )),
+                    millis_since_start: Instant::now().as_millis()
                 };
                 msg.encode_length_delimited(&mut buf.as_mut()).unwrap();
-                RADIO_CHANNEL.send(buf).await;
+                RADIO_CHANNEL.send(buf.clone()).await;
+                SD_CHANNEL.send(("state.txt", buf)).await;
                 info!("Ascent");
             }
             States::Fault => {
@@ -71,12 +72,14 @@ pub async fn sm_task(spawner: Spawner, mut state_machine: StateMachine<Context>)
 
                 let msg = messages_prost::radio::RadioFrame {
                     node: messages_prost::common::Node::Phoenix.into(),
-                    payload: Some(messages_prost::radio::radio_frame::Payload::State(
+                    payload: Some(messages_prost::radio::radio_frame::Payload::PhoenixState(
                         State::Fault.into(),
                     )),
+                    millis_since_start: Instant::now().as_millis()
                 };
                 msg.encode_length_delimited(&mut buf.as_mut()).unwrap();
-                RADIO_CHANNEL.send(buf).await;
+                RADIO_CHANNEL.send(buf.clone()).await;
+                SD_CHANNEL.send(("state.txt", buf)).await;
                 info!("Fault");
             }
             States::Init => {
@@ -84,12 +87,14 @@ pub async fn sm_task(spawner: Spawner, mut state_machine: StateMachine<Context>)
 
                 let msg = messages_prost::radio::RadioFrame {
                     node: messages_prost::common::Node::Phoenix.into(),
-                    payload: Some(messages_prost::radio::radio_frame::Payload::State(
+                    payload: Some(messages_prost::radio::radio_frame::Payload::PhoenixState(
                         State::Init.into(),
                     )),
+                    millis_since_start: Instant::now().as_millis()
                 };
                 msg.encode_length_delimited(&mut buf.as_mut()).unwrap();
-                RADIO_CHANNEL.send(buf).await;
+                RADIO_CHANNEL.send(buf.clone()).await;
+                SD_CHANNEL.send(("state.txt", buf)).await; 
 
                 let mut should_start = false; 
                 // await both channels to be armed. 
@@ -106,6 +111,18 @@ pub async fn sm_task(spawner: Spawner, mut state_machine: StateMachine<Context>)
 
                 if should_start {
                     EVENT_CHANNEL.send(Events::Start).await;
+                    
+                    let msg = messages_prost::radio::RadioFrame {
+                        node: messages_prost::common::Node::Phoenix.into(),
+                        payload: Some(messages_prost::radio::radio_frame::Payload::PhoenixEvent(
+                            Event::Start.into(),
+                        )),
+                        millis_since_start: Instant::now().as_millis()
+                    };
+
+                    msg.encode_length_delimited(&mut buf.as_mut()).unwrap();
+                    RADIO_CHANNEL.send(buf.clone()).await;
+                    SD_CHANNEL.send(("event.txt", buf)).await; 
                 }
                 info!("Init");
             }
@@ -114,12 +131,14 @@ pub async fn sm_task(spawner: Spawner, mut state_machine: StateMachine<Context>)
 
                 let msg = messages_prost::radio::RadioFrame {
                     node: messages_prost::common::Node::Phoenix.into(),
-                    payload: Some(messages_prost::radio::radio_frame::Payload::State(
+                    payload: Some(messages_prost::radio::radio_frame::Payload::PhoenixState(
                         State::WaitForLaunch.into(),
                     )),
+                    millis_since_start: Instant::now().as_millis()
                 };
                 msg.encode_length_delimited(&mut buf.as_mut()).unwrap();
-                RADIO_CHANNEL.send(buf).await;
+                RADIO_CHANNEL.send(buf.clone()).await;
+                SD_CHANNEL.send(("state.txt", buf)).await; 
                 info!("Wait For Launch");
             }
             States::Descent => {
@@ -137,42 +156,67 @@ pub async fn sm_task(spawner: Spawner, mut state_machine: StateMachine<Context>)
 
                 let msg = messages_prost::radio::RadioFrame {
                     node: messages_prost::common::Node::Phoenix.into(),
-                    payload: Some(messages_prost::radio::radio_frame::Payload::State(
+                    payload: Some(messages_prost::radio::radio_frame::Payload::PhoenixState(
                         State::Descent.into(),
                     )),
+                    millis_since_start: Instant::now().as_millis()
                 };
 
                 msg.encode_length_delimited(&mut buf.as_mut()).unwrap();
-                RADIO_CHANNEL.send(buf).await;
+                RADIO_CHANNEL.send(buf.clone()).await;
+                SD_CHANNEL.send(("state.txt", buf)).await; 
 
-
+                let msg = messages_prost::radio::RadioFrame {
+                    node: messages_prost::common::Node::Phoenix.into(),
+                    payload: Some(messages_prost::radio::radio_frame::Payload::PhoenixEvent(
+                        Event::DrogueDeployment.into(),
+                    )),
+                    millis_since_start: Instant::now().as_millis()
+                };
+                msg.encode_length_delimited(&mut buf.as_mut()).unwrap();
+                RADIO_CHANNEL.send(buf.clone()).await;
+                SD_CHANNEL.send(("event.txt", buf)).await;
             }
             States::DrogueDescent => {
                 let mut buf: [u8; 255] = [0; 255];
 
                 let msg = messages_prost::radio::RadioFrame {
                     node: messages_prost::common::Node::Phoenix.into(),
-                    payload: Some(messages_prost::radio::radio_frame::Payload::State(
+                    payload: Some(messages_prost::radio::radio_frame::Payload::PhoenixState(
                         State::DrogueDescent.into(),
                     )),
+                    millis_since_start: Instant::now().as_millis()
                 };
                 msg.encode_length_delimited(&mut buf.as_mut()).unwrap();
-                RADIO_CHANNEL.send(buf).await;
+                RADIO_CHANNEL.send(buf.clone()).await;
+                SD_CHANNEL.send(("state.txt", buf)).await; 
 
-                    let (altitude, temperature, sender, timestamp)  = PRESSURE_CHANNEL.receive().await; 
-                
-                    // sbg data
-                    if sender == 0 {
-                        if altitude >= crate::recovery::MAIN_HEIGHT {
-                            RECOVERY_MANAGER.lock(|cell| {
-                                if let Some(recovery_manager) = cell.borrow_mut().as_mut() {
-                                    recovery_manager.fire_main();
-                                }
-                            });
+                let (altitude, temperature, sender, timestamp)  = PRESSURE_CHANNEL.receive().await; 
+            
+                // sbg data
+                if sender == 0 {
+                    if altitude >= crate::recovery::MAIN_HEIGHT {
+                        RECOVERY_MANAGER.lock(|cell| {
+                            if let Some(recovery_manager) = cell.borrow_mut().as_mut() {
+                                recovery_manager.fire_main();
+                            }
+                        });
 
-                            EVENT_CHANNEL.send(Events::MainDeployment).await; 
-                        }
+                        EVENT_CHANNEL.send(Events::MainDeployment).await; 
+                    
+
+                        let msg = messages_prost::radio::RadioFrame {
+                            node: messages_prost::common::Node::Phoenix.into(),
+                            payload: Some(messages_prost::radio::radio_frame::Payload::PhoenixEvent(
+                                Event::MainDeployment.into(),
+                            )),
+                            millis_since_start: Instant::now().as_millis()
+                        };
+                        msg.encode_length_delimited(&mut buf.as_mut()).unwrap();
+                        RADIO_CHANNEL.send(buf.clone()).await;
+                        SD_CHANNEL.send(("event.txt", buf)).await;
                     }
+                }
 
             }
             States::Fuck => {
@@ -180,36 +224,42 @@ pub async fn sm_task(spawner: Spawner, mut state_machine: StateMachine<Context>)
 
                 let msg = messages_prost::radio::RadioFrame {
                     node: messages_prost::common::Node::Phoenix.into(),
-                    payload: Some(messages_prost::radio::radio_frame::Payload::State(
+                    payload: Some(messages_prost::radio::radio_frame::Payload::PhoenixState(
                         State::Fuck.into(),
                     )),
+                    millis_since_start: Instant::now().as_millis()
                 };
                 msg.encode_length_delimited(&mut buf.as_mut()).unwrap();
                 RADIO_CHANNEL.send(buf).await;
+                SD_CHANNEL.send(("state.txt", buf)).await; 
             }
             States::Landed => {
                 let mut buf: [u8; 255] = [0; 255];
     
                 let msg = messages_prost::radio::RadioFrame {
                     node: messages_prost::common::Node::Phoenix.into(),
-                    payload: Some(messages_prost::radio::radio_frame::Payload::State(
+                    payload: Some(messages_prost::radio::radio_frame::Payload::PhoenixState(
                         State::Landed.into(),
                     )),
+                    millis_since_start: Instant::now().as_millis(),
                 };
                 msg.encode_length_delimited(&mut buf.as_mut()).unwrap();
                 RADIO_CHANNEL.send(buf).await;
+                SD_CHANNEL.send(("state.txt", buf)).await; 
             }
             States::MainDescent => {
                 let mut buf: [u8; 255] = [0; 255];
 
                 let msg = messages_prost::radio::RadioFrame {
                     node: messages_prost::common::Node::Phoenix.into(),
-                    payload: Some(messages_prost::radio::radio_frame::Payload::State(
+                    payload: Some(messages_prost::radio::radio_frame::Payload::PhoenixState(
                         State::MainDescent.into(),
                     )),
+                    millis_since_start: Instant::now().as_millis(),
                 };
                 msg.encode_length_delimited(&mut buf.as_mut()).unwrap();
                 RADIO_CHANNEL.send(buf).await;
+                SD_CHANNEL.send(("state.txt", buf)).await; 
             }
         }
     }

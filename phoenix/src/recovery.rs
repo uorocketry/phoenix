@@ -1,12 +1,9 @@
-use common_arm::drivers::ms5611::{Ms5611, OversamplingRatio};
 use defmt::info;
 use embassy_stm32::gpio::{Input, Level, Output, Pull, Speed};
-use embassy_stm32::mode::Blocking;
 use embassy_stm32::peripherals::{
     ADC1, PA2, PA3, PB0, PC1, PC11, PC12, PC5, PD1, PD13, PD14, PD2, PD5, PD6,
 };
-use embassy_stm32::spi::Spi;
-use embassy_time::{Delay, Duration, Instant, Timer};
+use embassy_time::{Duration, Instant};
 use embedded_hal_1::delay::DelayNs;
 use embedded_hal_1::digital::OutputPin;
 use heapless::HistoryBuffer;
@@ -159,12 +156,12 @@ pub async fn recovery_algorithm_task() {
     let mut historical_barometer_altitude_baro: HistoryBuffer<(f32, Instant), 8> =
         HistoryBuffer::new();
 
-    let mut ignore_baro = false;
-    let mut ignore_sbg = false;
+    let ignore_baro = false;
+    let ignore_sbg = false;
 
     loop {
-        let mut baro_apogee_detected = false;
-        let mut sbg_apogee_detected = false;
+        let baro_apogee_detected = false;
+        let sbg_apogee_detected = false;
 
         let reading: (f32, f32, u8, Instant) = PRESSURE_CHANNEL.receive().await;
         // Hypsometric Formula
@@ -191,7 +188,7 @@ pub async fn recovery_algorithm_task() {
         //     continue;
         // }
 
-        let mut buf_sbg = historical_barometer_altitude_sbg.oldest_ordered();
+        let buf_sbg = historical_barometer_altitude_sbg.oldest_ordered();
         let mut buf_baro = historical_barometer_altitude_baro.oldest_ordered();
 
         // if buf_sbg.last().unwrap().1.duration_since(buf_sbg.last().unwrap().1) > SENSOR_TIMEOUT {

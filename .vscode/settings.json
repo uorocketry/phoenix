@@ -1,4 +1,5 @@
 {
     "rust-analyzer.cargo.target": "thumbv7em-none-eabihf",
-    "cmake.sourceDirectory": "/home/bonjour/Rocketry/phoenix/crates/sbg-rs/sbgECom"
+    "cmake.sourceDirectory": "/home/bonjour/Rocketry/phoenix/crates/sbg-rs/sbgECom",
+    "kiroAgent.configureMCP": "Disabled"
 }

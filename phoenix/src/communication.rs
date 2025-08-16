@@ -5,9 +5,9 @@ use embassy_stm32::mode;
 use embassy_stm32::mode::Async;
 use embassy_stm32::peripherals::{DMA2_CH3, DMA2_CH5, PE7, PE8, UART7};
 use embassy_stm32::usart::{RingBufferedUartRx, Uart, UartTx};
+use embassy_time::Instant;
 use messages_prost::mavlink;
 use messages_prost::mavlink::peek_reader::PeekReader;
-use messages_prost::mavlink::uorocketry::MavMessage;
 use messages_prost::prost::Message;
 use messages_prost::radio::radio_frame::Payload;
 
@@ -57,6 +57,12 @@ pub async fn radio_reader_task(mut rx: RingBufferedUartRx<'static>) {
                                 // info!("Received radio frame: {:?}", recv.node);
                                 if let Some(payload) = recv.payload {
                                     match payload {
+                                        Payload::ArgusEvent(_) => {
+
+                                        }
+                                        Payload::ArgusState(_) => {
+
+                                        }
                                         Payload::Sbg(sbg_data) => {
                                             info!(
                                                 "Received SBG data: {:?}",
@@ -85,11 +91,11 @@ pub async fn radio_reader_task(mut rx: RingBufferedUartRx<'static>) {
                                             info!("Received Log data: {:?}", log_data.level);
                                             // Handle Log data
                                         }
-                                        Payload::State(state) => {
+                                        Payload::PhoenixState(state) => {
                                             info!("Received State message: {:?}", state);
                                             // Handle State message
                                         }
-                                        Payload::Event(event) => {
+                                        Payload::PhoenixEvent(event) => {
                                             
                                         }
                                         Payload::Barometer(barometer_data) => {
@@ -108,7 +114,6 @@ pub async fn radio_reader_task(mut rx: RingBufferedUartRx<'static>) {
                                                         todo!("Powering down camera not implemented yet");
                                                     }
                                                     messages_prost::command::command::Data::Ping(ping) => {
-                                                        // info!("Received Ping command: {:?}", ping);
                                                         info!("Ping");
                                                         let mut buf: [u8; 255] = [0; 255];
                                                         let msg = messages_prost::radio::RadioFrame {
@@ -121,8 +126,10 @@ pub async fn radio_reader_task(mut rx: RingBufferedUartRx<'static>) {
                                                                             id: ping.id,
                                                                         }
                                                                     )),
+                                                                    
                                                                 }
-                                                            ))
+                                                            )),
+                                                            millis_since_start: Instant::now().as_millis()
                                                         };
                                                         msg.encode_length_delimited(&mut buf.as_mut())
                                                             .expect("Failed to encode SBG GPS Position");

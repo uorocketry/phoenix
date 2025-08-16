@@ -12,7 +12,6 @@ use embassy_stm32::{bind_interrupts, mode, peripherals, usart};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::blocking_mutex::Mutex;
 use embassy_sync::channel::Channel;
-use embassy_sync::signal::Signal;
 use embassy_time::Instant;
 use embedded_alloc::LlffHeap as Heap;
 use messages_prost::sbg::SbgData;

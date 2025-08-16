@@ -4,10 +4,9 @@ use embassy_stm32::gpio::{Level, Output, Speed};
 use embassy_stm32::mode;
 use embassy_stm32::peripherals::{DMA1_CH5, DMA1_CH6, PA4, PB2, PE0, PE1, UART8};
 use embassy_stm32::usart::{Config, RingBufferedUartRx, Uart, UartTx};
-use embassy_time::Delay;
+use embassy_time::{Delay, Instant};
 use embedded_hal_1::delay::DelayNs;
 use messages_prost::gps::Gps;
-use messages_prost::radio::RadioFrame;
 use ublox::cfg_val::CfgVal;
 use ublox::{
     CfgLayerSet, CfgPrtUartBuilder, CfgRstBuilder, CfgValSetBuilder, DataBits, InProtoMask,
@@ -125,6 +124,7 @@ pub async fn uart_gps_dma_reader_task(
                     data: bytes.to_vec()
                 },
             )),
+            millis_since_start: Instant::now().as_millis()
         };
         msg.encode_length_delimited(&mut buf.as_mut()).unwrap();
         RADIO_CHANNEL.send(buf).await;

@@ -13,8 +13,7 @@ use chrono::NaiveDateTime;
 use defmt::info;
 use embassy_stm32::mode;
 use embassy_stm32::usart::{RingBufferedUartRx, UartTx};
-use embassy_time::Delay;
-use embedded_hal_1::delay::DelayNs;
+use embassy_time::Instant;
 use heapless::Vec;
 use messages_prost::prost::Message;
 use sbg_rs::sbg;
@@ -59,6 +58,7 @@ pub async fn sbg_receiver_task() {
                 let msg = messages_prost::radio::RadioFrame {
                     node: messages_prost::common::Node::Phoenix.into(),
                     payload: Some(messages_prost::radio::radio_frame::Payload::Sbg(data)),
+                    millis_since_start: Instant::now().as_millis()
                 };
                 msg.encode_length_delimited(&mut buf.as_mut())
                     .expect("Failed to encode SBG GPS Position");

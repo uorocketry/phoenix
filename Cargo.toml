@@ -70,7 +70,8 @@ version = "0.8.0"
 version = "0.6.0"
 
 [workspace.dependencies.messages-prost]
-git = "https://github.com/uorocketry/messages-prost"
+#git = "https://github.com/uorocketry/messages-prost"
+path = "/home/bonjour/Rocketry/messages-prost"
 
 [workspace.dependencies.defmt-test]
 version = "0.3.2"

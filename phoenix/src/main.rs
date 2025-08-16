@@ -18,20 +18,17 @@ mod state_machine;
 use core::cell::RefCell;
 
 use defmt::*;
+use messages_prost::prost::Message;
 use embassy_executor::Spawner;
-use embassy_stm32::gpio::{Input, Level, Output, OutputType, Pull, Speed};
-use embassy_stm32::{mode, peripherals};
+use embassy_stm32::gpio::{Level, Output, OutputType, Speed};
+use embassy_stm32::mode;
 use embassy_stm32::spi::{Config as SpiConfig, Spi};
 use embassy_stm32::time::{khz, mhz};
 use embassy_stm32::timer::simple_pwm::{PwmPin, SimplePwm};
 use embassy_stm32::usart::{Config as UartConfig, Uart};
-use embassy_sync::blocking_mutex::NoopMutex;
-use embassy_time::{Delay, Duration, Timer};
-use embedded_hal_1::delay::DelayNs;
-use embedded_hal_1::digital::OutputPin;
-use embedded_hal_1::spi::SpiDevice;
-use embassy_embedded_hal::shared_bus::blocking::spi::SpiDevice as SpiDeviceBus;
+use embassy_time::{Delay, Duration, Instant, Timer};
 use embedded_hal_bus::spi::RefCellDevice;
+use messages_prost::phoenix_state::Event;
 use static_cell::StaticCell;
 // use embedded_alloc::Heap;
 use crate::state_machine::StateMachine;
@@ -45,7 +42,7 @@ use common_arm::drivers::ms5611::Ms5611;
 use crate::camera::Cameras;
 use crate::communication::{radio_reader_task, radio_writer_task};
 use crate::recovery::RecoveryManager;
-use crate::resources::{Irqs, EVENT_CHANNEL, HEAP, RECOVERY_MANAGER, RX_SBG_BUF};
+use crate::resources::{Irqs, EVENT_CHANNEL, HEAP, RADIO_CHANNEL, RECOVERY_MANAGER, RX_SBG_BUF, SD_CHANNEL};
 
 pub static IMU_BUS_CELL: StaticCell<RefCell<Spi<mode::Blocking>>> = StaticCell::new();
 
@@ -196,7 +193,7 @@ async fn main(spawner: Spawner) {
     });
 
     // --- Camera Triggers ---
-    let mut cameras = Cameras::new(p.PE14, p.PE12);
+    let cameras = Cameras::new(p.PE14, p.PE12);
 
     // cameras.start_recording();
     // Delay.delay_ms(10_000);
@@ -243,7 +240,21 @@ async fn main(spawner: Spawner) {
     // pass control of the spawner to the state machine
     spawner.must_spawn(state_machine::sm_task(spawner, state_machine));
 
-    EVENT_CHANNEL
-        .send(crate::state_machine::Events::Start)
-        .await;
+    // EVENT_CHANNEL
+    //     .send(crate::state_machine::Events::Start)
+    //     .await;
+
+    // let mut buf: [u8; 255] = [0; 255];
+
+    // // let msg = messages_prost::radio::RadioFrame {
+    // //     node: messages_prost::common::Node::Phoenix.into(),
+    // //     payload: Some(messages_prost::radio::radio_frame::Payload::Event(
+    // //         Event::Start.into(),
+    // //     )),
+    // //     millis_since_start: Instant::now().as_millis()
+    // // };
+    // // msg.encode_length_delimited(&mut buf.as_mut()).unwrap();
+    // // RADIO_CHANNEL.send(buf.clone()).await;
+    // // SD_CHANNEL.send(("state.txt", buf)).await;
+    // // info!("Ascent");
 }

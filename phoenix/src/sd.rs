@@ -80,7 +80,7 @@ pub async fn sdmmc_task(
         let root_dir = volume0.open_root_dir().unwrap();
 
         loop {
-            let (mut file, data) = SD_CHANNEL.receive().await;
+            let (file, data) = SD_CHANNEL.receive().await;
             if let Ok(file) =
                 root_dir.open_file_in_dir(file, embedded_sdmmc::Mode::ReadWriteCreateOrAppend)
             {

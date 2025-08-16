@@ -4,7 +4,7 @@
 
 use defmt::{error, info, warn};
 use embassy_stm32::gpio::{Input, Level, Output, Pull, Speed};
-use embassy_stm32::mode::{Async, Blocking};
+use embassy_stm32::mode::Blocking;
 use embassy_stm32::peripherals::{PB4, PB5, PB6, PC0, PC10, PD4, SPI3};
 use embassy_stm32::spi::{Config, Spi};
 use embassy_stm32::time::mhz;

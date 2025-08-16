@@ -1,6 +1,4 @@
 use defmt::{info, warn, Format};
-use embassy_stm32::gpio::Output;
-use embassy_stm32::spi::Spi;
 use embedded_hal_1::spi::{Operation, SpiDevice};
 
 // Register addresses from the datasheet
