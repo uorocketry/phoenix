@@ -7,7 +7,7 @@ use core::ptr;
 // use crate::app::sbg_sd_task as sbg_sd;
 // use crate::app::sbg_write_data;
 use super::sbg_manager;
-use crate::resources::{BUFFER_CHANNEL, PRESSURE_CHANNEL, RADIO_CHANNEL, RTC, SBG_CHANNEL};
+use crate::resources::{BUFFER_CHANNEL, PRESSURE_CHANNEL, RADIO_CHANNEL, RTC, SBG_CHANNEL, SD_CHANNEL};
 use crate::HEAP;
 use chrono::NaiveDateTime;
 use defmt::info;
@@ -37,7 +37,6 @@ pub async fn uart_dma_reader_task(mut rx: RingBufferedUartRx<'static>) {
                 let _ = BUFFER_CHANNEL.send(buf).await;
             }
         }
-        Delay.delay_ms(100);
     }
 }
 
@@ -63,7 +62,9 @@ pub async fn sbg_receiver_task() {
                 };
                 msg.encode_length_delimited(&mut buf.as_mut())
                     .expect("Failed to encode SBG GPS Position");
-                RADIO_CHANNEL.send(buf).await;
+                RADIO_CHANNEL.send(buf.clone()).await;
+
+                SD_CHANNEL.send(("sbg.txt", buf)).await; 
             }
             None => {
                 info!("No SBG data received");
@@ -136,11 +137,16 @@ pub fn sbg_get_time() -> u32 {
 pub fn sbg_handle_data(data: CallbackData) {
     match data {
         CallbackData::Air(x) => {
-            PRESSURE_CHANNEL.try_send((x.data.unwrap().altitude, x.data.unwrap().air_temperature, 0, embassy_time::Instant::now())); 
+            PRESSURE_CHANNEL.try_send((
+                x.data.unwrap().altitude,
+                x.data.unwrap().air_temperature,
+                0,
+                embassy_time::Instant::now(),
+            ));
             SBG_CHANNEL.try_send(messages_prost::sensor::sbg::SbgData {
                 data: Some(messages_prost::sensor::sbg::sbg_data::Data::Air(x)),
             })
-        },
+        }
         CallbackData::EkfNav(x) => SBG_CHANNEL.try_send(messages_prost::sensor::sbg::SbgData {
             data: Some(messages_prost::sensor::sbg::sbg_data::Data::EkfNav(x)),
         }),

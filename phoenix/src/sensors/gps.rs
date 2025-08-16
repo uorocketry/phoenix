@@ -6,11 +6,15 @@ use embassy_stm32::peripherals::{DMA1_CH5, DMA1_CH6, PA4, PB2, PE0, PE1, UART8};
 use embassy_stm32::usart::{Config, RingBufferedUartRx, Uart, UartTx};
 use embassy_time::Delay;
 use embedded_hal_1::delay::DelayNs;
+use messages_prost::gps::Gps;
+use messages_prost::radio::RadioFrame;
 use ublox::cfg_val::CfgVal;
 use ublox::{
     CfgLayerSet, CfgPrtUartBuilder, CfgRstBuilder, CfgValSetBuilder, DataBits, InProtoMask,
     NavBbrMask, OutProtoMask, Parity, ResetMode, StopBits, UartMode, UartPortId,
 };
+use messages_prost::prost::Message;
+use crate::resources::RADIO_CHANNEL;
 
 pub async fn setup_gps(
     gps_enable: PA4,
@@ -110,24 +114,19 @@ pub async fn uart_gps_dma_reader_task(
         let mut buf_data: [u8; GPS_BUFFER_SIZE] = [0; GPS_BUFFER_SIZE];
         gps_rx.read(&mut buf_data).await;
         info!("GPS data read: {:?}", &buf_data[..]);
-        Delay.delay_ms(1000);
         let buf: [u8; GPS_BUFFER_SIZE] = [0; GPS_BUFFER_SIZE];
         let bytes: [u8; GPS_BUFFER_SIZE] = [0; GPS_BUFFER_SIZE];
+        let mut buf: [u8; 255] = [0; 255];
 
-        let mut nmea = nmea::Nmea::default();
-        let ascii_buf = unsafe { buf_data.as_ascii_unchecked() };
-        info!("BUFFER: {}", ascii_buf.as_str());
-        // if let Some(ascii_buf) = ascii_buf {
-        let res = nmea.parse(ascii_buf.as_str());
-
-        match res {
-            Ok(strings) => {
-                info!("Result: {}", strings.as_str());
-                
-            }
-            _ => {
-                info!("nmea parser none found");
-            }
-        }
+        let msg = messages_prost::radio::RadioFrame {
+            node: messages_prost::common::Node::Phoenix.into(),
+            payload: Some(messages_prost::radio::radio_frame::Payload::Gps(
+                Gps {
+                    data: bytes.to_vec()
+                },
+            )),
+        };
+        msg.encode_length_delimited(&mut buf.as_mut()).unwrap();
+        RADIO_CHANNEL.send(buf).await;
     }
 }

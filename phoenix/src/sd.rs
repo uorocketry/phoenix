@@ -1,4 +1,4 @@
-use crate::resources::SPI_BUS_CELL;
+use crate::resources::{SD_CHANNEL, SPI_BUS_CELL};
 use core::cell::RefCell;
 use core::marker::PhantomData;
 use embassy_stm32::gpio::{Level, Output, Speed};
@@ -8,7 +8,7 @@ use embassy_stm32::spi::{BitOrder, Spi};
 use embassy_stm32::time::mhz;
 use embassy_time::Delay;
 use embedded_hal_bus::spi::RefCellDevice;
-use embedded_sdmmc::SdCard;
+use embedded_sdmmc::{BlockDevice, SdCard, VolumeManager};
 
 pub struct TimeSink {
     _marker: PhantomData<*const ()>,
@@ -62,6 +62,40 @@ pub fn setup_sdmmc_interface(
 }
 
 #[embassy_executor::task]
-async fn sdmmc_task() {
-    loop {}
+pub async fn sdmmc_task(
+    sd: embedded_sdmmc::SdCard<
+        embedded_hal_bus::spi::RefCellDevice<
+            'static,
+            Spi<'static, embassy_stm32::mode::Blocking>,
+            Output<'static>,
+            Delay,
+        >,
+        Delay,
+    >,
+) {
+    // setup the directory object
+    let volume_mgr = VolumeManager::new(sd, TimeSink::new());
+    if let Ok(volume0) = volume_mgr.open_volume(embedded_sdmmc::VolumeIdx(0)) {
+        // should never fail
+        let root_dir = volume0.open_root_dir().unwrap();
+
+        loop {
+            let (mut file, data) = SD_CHANNEL.receive().await;
+            if let Ok(file) =
+                root_dir.open_file_in_dir(file, embedded_sdmmc::Mode::ReadWriteCreateOrAppend)
+            {
+                match file.write(&data) {
+                    Err(_) => {
+                        todo!("Log to radio we failed to write.");
+                    }
+                    _ => {}
+                }
+                file.flush();
+            }
+        }
+    } else {
+        // Log to the radio in the event this happens.
+        // Could trigger the fault state.
+        todo!("Write to the radio Fault");
+    };
 }

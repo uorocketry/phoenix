@@ -24,15 +24,18 @@ pub type BackendDevice = <Backend as burn::tensor::backend::Backend>::Device;
 
 type DmaBuffer = [u8; SBG_BUFFER_SIZE];
 
-pub const GPS_BUFFER_SIZE: usize = 256;
+pub const GPS_BUFFER_SIZE: usize = 128;
 
 pub const RADIO_BUFFER_SIZE: usize = 255;
+
+pub const SD_BUFFER_SIZE: usize = 255;
 
 #[global_allocator]
 pub static HEAP: Heap = Heap::empty();
 
-pub static PRESSURE_CHANNEL: Channel<CriticalSectionRawMutex, (f32, f32, u8, Instant), 10> = Channel::new();
-
+pub static PRESSURE_CHANNEL: Channel<CriticalSectionRawMutex, (f32, f32, u8, Instant), 10> =
+    Channel::new();
+pub static SD_CHANNEL: Channel<CriticalSectionRawMutex, (&str, [u8; SD_BUFFER_SIZE]), 5> = Channel::new(); // file name, data
 pub static SBG_CHANNEL: Channel<CriticalSectionRawMutex, SbgData, 10> = Channel::new();
 pub static BUFFER_CHANNEL: Channel<CriticalSectionRawMutex, DmaBuffer, 10> = Channel::new();
 pub static EVENT_CHANNEL: Channel<CriticalSectionRawMutex, Events, 2> = Channel::new();

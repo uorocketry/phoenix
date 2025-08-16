@@ -12,7 +12,16 @@ use embedded_hal_1::digital::OutputPin;
 use heapless::HistoryBuffer;
 use libm::powf;
 
-use crate::resources::PRESSURE_CHANNEL;
+use crate::resources::{EVENT_CHANNEL, PRESSURE_CHANNEL};
+
+const SENSOR_TIMEOUT: Duration = Duration::from_millis(10_000);
+pub const MAIN_HEIGHT: f32 = GROUND_HEIGHT + 500.0; // meters ASL
+const HEIGHT_MIN: f32 = GROUND_HEIGHT + 300.0; // meters ASL
+const GROUND_HEIGHT: f32 = 300.0; // meters ASL
+const ASCENT_LOCKOUT: f32 = 100.0;
+const DATA_POINTS: usize = 8;
+const VALID_DESCENT_RATE: f32 = -5.0; // meters per millise
+
 // --- Boom Boom Setup ---
 /*
    MAIN_ARM/TEST = PD6
@@ -110,6 +119,10 @@ impl RecoveryManager {
         }
     }
 
+    pub fn is_armed(&mut self) -> bool {
+        self.ejection_enable.is_high()
+    }
+
     pub fn disarm(&mut self) {
         info!("arm ejection disabled");
         self.arming.main.set_low();
@@ -139,16 +152,12 @@ impl RecoveryManager {
 #[embassy_executor::task]
 pub async fn recovery_algorithm_task() {
     info!("Barometer reader task started.");
-    const SENSOR_TIMEOUT: Duration = Duration::from_millis(10_000);
-    const MAIN_HEIGHT: f32 = GROUND_HEIGHT + 500.0; // meters ASL
-    const HEIGHT_MIN: f32 = GROUND_HEIGHT + 300.0; // meters ASL
-    const GROUND_HEIGHT: f32 = 300.0; // meters ASL
-    const ASCENT_LOCKOUT: f32 = 100.0;
-    const DATA_POINTS: usize = 8;
-    const VALID_DESCENT_RATE: f32 = -5.0; // meters per millise
 
-    let mut historical_barometer_altitude_sbg: HistoryBuffer<(f32, Instant), 8> = HistoryBuffer::new();
-    let mut historical_barometer_altitude_baro: HistoryBuffer<(f32, Instant), 8> = HistoryBuffer::new();
+
+    let mut historical_barometer_altitude_sbg: HistoryBuffer<(f32, Instant), 8> =
+        HistoryBuffer::new();
+    let mut historical_barometer_altitude_baro: HistoryBuffer<(f32, Instant), 8> =
+        HistoryBuffer::new();
 
     let mut ignore_baro = false;
     let mut ignore_sbg = false;
@@ -159,19 +168,17 @@ pub async fn recovery_algorithm_task() {
 
         let reading: (f32, f32, u8, Instant) = PRESSURE_CHANNEL.receive().await;
         // Hypsometric Formula
-        let mut altitude = 0.0; 
+        let mut altitude = 0.0;
         if reading.2 == 1 {
             altitude =
                 ((powf(101.325 / reading.0, 1.0 / 5.257) - 1.0) * (reading.1 + 273.15)) / 0.0065;
             info!("Baro Altitude data {}, {}", altitude, reading.3);
             historical_barometer_altitude_baro.write((altitude, reading.3));
-
         } else if reading.2 == 0 {
             info!("SBG Altitude data {}, {}", reading.0, reading.3);
             altitude = reading.0;
             historical_barometer_altitude_sbg.write((altitude, reading.3));
         }
-        
 
         // Apogee detection logic
         if historical_barometer_altitude_sbg.len() < 8 {
@@ -179,10 +186,10 @@ pub async fn recovery_algorithm_task() {
             continue;
         }
 
-        if historical_barometer_altitude_baro.len() < 8 {
-            info!("not enough data points to detect apogee");
-            continue;
-        }
+        // if historical_barometer_altitude_baro.len() < 8 {
+        //     info!("not enough data points to detect apogee");
+        //     continue;
+        // }
 
         let mut buf_sbg = historical_barometer_altitude_sbg.oldest_ordered();
         let mut buf_baro = historical_barometer_altitude_baro.oldest_ordered();
@@ -209,8 +216,7 @@ pub async fn recovery_algorithm_task() {
                 // `current_reading` is also a tuple
                 // Calculate time diff between the actual measurement times.
                 // Convert from micros to seconds for a more standard rate unit (meters/sec).
-                let time_diff =
-                    current_reading.1.duration_since(prev_reading.1).as_millis();
+                let time_diff = current_reading.1.duration_since(prev_reading.1).as_millis();
 
                 // info!(
                 //     "prev alt: {}, new alt: {}, time diff: {} ms",
@@ -242,6 +248,14 @@ pub async fn recovery_algorithm_task() {
                         "SBG Apogee detected! Average vertical speed: {} m/s",
                         avg_slope * 1000.0
                     );
+                    match EVENT_CHANNEL.try_send(crate::state_machine::Events::Apogee) {
+                        Err(_) => {
+                            // log event to radio. give up firing control to the COTS backup.
+                            todo!("Log failure to radio");
+                        }
+                        _ => {}
+                    }
+                    break; 
                 }
             }
         }
@@ -255,8 +269,7 @@ pub async fn recovery_algorithm_task() {
                 // `current_reading` is also a tuple
                 // Calculate time diff between the actual measurement times.
                 // Convert from micros to seconds for a more standard rate unit (meters/sec).
-                let time_diff =
-                    current_reading.1.duration_since(prev_reading.1).as_millis();
+                let time_diff = current_reading.1.duration_since(prev_reading.1).as_millis();
 
                 // info!(
                 //     "prev alt: {}, new alt: {}, time diff: {} ms",
@@ -290,7 +303,6 @@ pub async fn recovery_algorithm_task() {
                     );
                 }
             }
-
         }
     }
 }

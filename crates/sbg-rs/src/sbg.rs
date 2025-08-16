@@ -24,7 +24,7 @@ use messages_prost::sensor::sbg::*;
 /**
  * Max buffer size for SBG messages.
  */
-pub const SBG_BUFFER_SIZE: usize = 1024;
+pub const SBG_BUFFER_SIZE: usize = 512;
 
 /**
  * Represents the index of the buffer that is currently being used.

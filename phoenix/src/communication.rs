@@ -85,12 +85,12 @@ pub async fn radio_reader_task(mut rx: RingBufferedUartRx<'static>) {
                                             info!("Received Log data: {:?}", log_data.level);
                                             // Handle Log data
                                         }
-                                        Payload::State(state_message) => {
-                                            info!(
-                                                "Received State message: {:?}",
-                                                state_message.state
-                                            );
+                                        Payload::State(state) => {
+                                            info!("Received State message: {:?}", state);
                                             // Handle State message
+                                        }
+                                        Payload::Event(event) => {
+                                            
                                         }
                                         Payload::Barometer(barometer_data) => {
                                             // Handle Barometer data
@@ -99,6 +99,14 @@ pub async fn radio_reader_task(mut rx: RingBufferedUartRx<'static>) {
                                             info!("Received Command: {:?}", command.data.is_some());
                                             if let Some(command_data) = command.data {
                                                 match command_data {
+                                                    messages_prost::command::command::Data::PowerUpCamera(power_up_camera) => {
+                                                        info!("Powering up camera");
+                                                        todo!("Powering up camera not implemented yet");
+                                                    }
+                                                    messages_prost::command::command::Data::PowerDownCamera(power_down_camera) => {
+                                                        info!("Powering down camera");
+                                                        todo!("Powering down camera not implemented yet");
+                                                    }
                                                     messages_prost::command::command::Data::Ping(ping) => {
                                                         // info!("Received Ping command: {:?}", ping);
                                                         info!("Ping");
@@ -194,24 +202,35 @@ pub async fn radio_reader_task(mut rx: RingBufferedUartRx<'static>) {
 
 #[embassy_executor::task]
 pub async fn radio_writer_task(mut tx: UartTx<'static, mode::Async>) {
+    let mut sequence = 0; 
+
     loop {
         let data = RADIO_CHANNEL.receive().await;
 
         let mav_header = mavlink::MavHeader {
             system_id: 1,
             component_id: 1,
-            sequence: 1,
+            sequence,
         };
 
         let mav_message = mavlink::uorocketry::MavMessage::POSTCARD_MESSAGE(
             mavlink::uorocketry::POSTCARD_MESSAGE_DATA { message: data },
         );
-        mavlink::write_versioned_msg_async(
+        match mavlink::write_versioned_msg_async(
             &mut tx,
             mavlink::MavlinkVersion::V2,
             mav_header,
             &mav_message,
         )
-        .await;
+        .await {
+            Ok(bytes) => {
+                sequence = sequence.wrapping_add(1);
+            }
+            _ => {
+                info!("Failed to write");
+            }
+        }
+
+
     }
 }
