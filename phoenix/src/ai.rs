@@ -27,7 +27,7 @@ fn normalize_value(value: f32, min: f32, max: f32) -> f32 {
 }
 
 #[embassy_executor::task]
-async fn ai_task() {
+pub async fn ai_task() {
     info!("AI Inference Task starting...");
 
     let device = AiDevice::default();

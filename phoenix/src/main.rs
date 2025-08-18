@@ -18,10 +18,12 @@ mod state_machine;
 use core::cell::RefCell;
 
 use defmt::*;
+use embassy_stm32::wdg::IndependentWatchdog;
 use messages_prost::prost::Message;
+use embedded_hal_1::delay::DelayNs;
 use embassy_executor::Spawner;
 use embassy_stm32::gpio::{Level, Output, OutputType, Speed};
-use embassy_stm32::mode;
+use embassy_stm32::{mode, peripherals};
 use embassy_stm32::spi::{Config as SpiConfig, Spi};
 use embassy_stm32::time::{khz, mhz};
 use embassy_stm32::timer::simple_pwm::{PwmPin, SimplePwm};
@@ -48,7 +50,7 @@ pub static IMU_BUS_CELL: StaticCell<RefCell<Spi<mode::Blocking>>> = StaticCell::
 
 
 #[embassy_executor::task]
-async fn imu_task(mut imu: sensors::iim20670::Iim20670<RefCellDevice<'static, Spi<'static, mode::Blocking>, Output<'static>, Delay>>) {
+async fn imu_task(mut imu: sensors::iim20670::Iim20670<RefCellDevice<'static, Spi<'static, mode::Blocking>, Output<'static>, Delay>, Delay>) {
     if imu.init().is_ok() {
         loop {
             if let Ok(accel) = imu.read_accel() {
@@ -123,20 +125,21 @@ async fn main(spawner: Spawner) {
     info!("Heap usage: {} bytes", HEAP.used());
 
     // --- IMU Setup ---
-    // let mut spi_config = SpiConfig::default();
-    // spi_config.frequency = mhz(10); // Max 10 MHz for IIM-20670
-    // let imu_spi = Spi::new_blocking(
-    //     p.SPI3,
-    //     p.PB3, // SCK
-    //     p.PB5, // MOSI
-    //     p.PB4, // MISO
-    //     spi_config,
-    // );
-    // let imu_cs = Output::new(p.PA15, Level::High, Speed::VeryHigh);
-
-    // let imu_bus_ref = IMU_BUS_CELL.init(RefCell::new(imu_spi));
-    // let imu_spi_device = RefCellDevice::new(imu_bus_ref, imu_cs, Delay).unwrap();
-    // let mut imu = sensors::iim20670::Iim20670::new(imu_spi_device);
+    // embassy_stm32::rcc::enable_and_reset::<peripherals::SPI3>();
+    let mut spi_config = SpiConfig::default();
+    spi_config.frequency = mhz(10); // Max 10 MHz for IIM-20670
+    let imu_spi = Spi::new_blocking(
+        p.SPI3,
+        p.PB3, // SCK
+        p.PB5, // MOSI
+        p.PB4, // MISO
+        spi_config,
+    );
+    let imu_cs = Output::new(p.PA15, Level::Low, Speed::Low);
+    let imu_nreset = Output::new(p.PD4, Level::High, Speed::Low);
+    let imu_bus_ref = IMU_BUS_CELL.init(RefCell::new(imu_spi));
+    let imu_spi_device = RefCellDevice::new(imu_bus_ref, imu_cs, Delay).unwrap();
+    let mut imu = sensors::iim20670::Iim20670::new(imu_spi_device, Delay);
 
 
     // --- SBG Setup ---
@@ -175,7 +178,7 @@ async fn main(spawner: Spawner) {
         >,
         Delay,
     > = sd::setup_sdmmc_interface(p.SPI1, p.PA5, p.PA7, p.PA6, p.PE9);
-    
+
     // --- GPS Setup ---
     let (ring_gps_rx, gps_tx) = sensors::gps::setup_gps(
         p.PA4, p.PB2, p.UART8, p.PE0, p.PE1, p.DMA1_CH5, p.DMA1_CH6, Irqs,
@@ -193,12 +196,12 @@ async fn main(spawner: Spawner) {
     });
 
     // --- Camera Triggers ---
-    let cameras = Cameras::new(p.PE14, p.PE12);
+    let mut cameras = Cameras::new(p.PE14, p.PE12);
 
-    // cameras.start_recording();
-    // Delay.delay_ms(10_000);
-    // cameras.stop_recording();
-    // info!("Camera recording started and stopped.");
+    cameras.start_recording();
+    Delay.delay_ms(10_000);
+    cameras.stop_recording();
+    info!("Camera recording started and stopped.");
 
     // --- Buzzer 🐝 ---
     let buzz_out_pin = PwmPin::new_ch1(p.PC6, OutputType::PushPull);
@@ -215,7 +218,6 @@ async fn main(spawner: Spawner) {
     info!("Duty Cycle: {}", ch1.max_duty_cycle());
     ch1.set_duty_cycle(ch1.max_duty_cycle() / 4);
     ch1.enable();
-    music::play_song(&mut pwm, music::TWINKLE_MELODY, 1300).await;
 
     // --- State Machine ---
     let state_machine = StateMachine::new(state_machine::Context {});
@@ -230,7 +232,7 @@ async fn main(spawner: Spawner) {
     spawner.must_spawn(sensors::sbg_manager::sbg_parser_task(tx));
     spawner.must_spawn(sensors::sbg_manager::sbg_receiver_task());
     spawner.must_spawn(sensors::baro::baro_reader_task(baro));
-    // spawner.must_spawn(ai_task());
+    // // spawner.must_spawn(ai::ai_task());
     spawner.must_spawn(radio_reader_task(radio_ring_rx));
     spawner.must_spawn(radio_writer_task(radio_tx));
     spawner.must_spawn(sd::sdmmc_task(sd_card)); 
@@ -239,4 +241,11 @@ async fn main(spawner: Spawner) {
 
     // pass control of the spawner to the state machine
     spawner.must_spawn(state_machine::sm_task(spawner, state_machine));
+
+    // // watch dog with 10 second timeout 
+    // let mut watch_dog = IndependentWatchdog::new(p.IWDG1, 10_000); 
+    // watch_dog.unleash();
+
+    info!("Device {} has started.", embassy_stm32::uid::uid_hex());
+    music::play_song(&mut pwm, music::TWINKLE_MELODY, 1300).await;
 }

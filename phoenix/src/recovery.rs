@@ -3,10 +3,10 @@ use embassy_stm32::gpio::{Input, Level, Output, Pull, Speed};
 use embassy_stm32::peripherals::{
     ADC1, PA2, PA3, PB0, PC1, PC11, PC12, PC5, PD1, PD13, PD14, PD2, PD5, PD6,
 };
-use embassy_time::{Duration, Instant};
+use embassy_time::{Duration, Instant, Timer};
 use embedded_hal_1::delay::DelayNs;
 use embedded_hal_1::digital::OutputPin;
-use heapless::HistoryBuffer;
+use heapless::{HistoryBuffer, Vec};
 use libm::powf;
 
 use crate::resources::{EVENT_CHANNEL, PRESSURE_CHANNEL};
@@ -15,9 +15,9 @@ const SENSOR_TIMEOUT: Duration = Duration::from_millis(10_000);
 pub const MAIN_HEIGHT: f32 = GROUND_HEIGHT + 500.0; // meters ASL
 const HEIGHT_MIN: f32 = GROUND_HEIGHT + 300.0; // meters ASL
 const GROUND_HEIGHT: f32 = 300.0; // meters ASL
-const ASCENT_LOCKOUT: f32 = 100.0;
-const DATA_POINTS: usize = 8;
-const VALID_DESCENT_RATE: f32 = -5.0; // meters per millise
+const ASCENT_LOCKOUT: f32 = 0.01;
+const DATA_POINTS: usize = 10;
+const VALID_DESCENT_RATE: f32 = -0.005; // meters per millise
 
 // --- Boom Boom Setup ---
 /*
@@ -146,160 +146,287 @@ impl RecoveryManager {
     }
 }
 
+// #[embassy_executor::task]
+// pub async fn recovery_algorithm_task() {
+//     info!("Barometer reader task started.");
+
+//     // History buffers to store recent altitude readings from two different sources.
+//     // Each entry is a tuple of (altitude, timestamp).
+//     let mut historical_barometer_altitude_sbg: HistoryBuffer<(f32, Instant), 20> =
+//         HistoryBuffer::new();
+//     let mut historical_barometer_altitude_baro: HistoryBuffer<(f32, Instant), 20> =
+//         HistoryBuffer::new();
+
+//     // These flags are declared but not used in the provided snippet.
+//     // They might be intended for logic to ignore faulty sensors.
+//     let ignore_baro = false;
+//     let ignore_sbg = false;
+
+//     loop {
+//         // Flags to track apogee detection, not used in the provided logic.
+//         let baro_apogee_detected = false;
+//         let sbg_apogee_detected = false;
+
+//         // Wait for a new pressure reading from the channel.
+//         // The reading includes pressure, temperature, a source identifier, and a timestamp.
+//         let reading: (f32, f32, u8, Instant) = PRESSURE_CHANNEL.receive().await;
+        
+//         // This variable will hold the calculated altitude.
+//         let mut altitude = 0.0;
+
+//         // Process the reading based on its source identifier.
+//         if reading.2 == 1 { // Source is the barometer (baro)
+//             // Hypsometric Formula to convert pressure and temperature to altitude.
+//             altitude =
+//                 ((powf(101.325 / reading.0, 1.0 / 5.257) - 1.0) * (reading.1 + 273.15)) / 0.0065;
+//             historical_barometer_altitude_baro.write((altitude, reading.3));
+//         } else if reading.2 == 0 { // Source is the SBG
+//             info!("SBG Altitude data {}, {}", reading.0, reading.3);
+//             altitude = reading.0; // SBG provides altitude directly.
+//             historical_barometer_altitude_sbg.write((altitude, reading.3));
+//         }
+
+//         // --- Apogee Detection Logic ---
+//         // Ensure there are enough data points in the buffer to perform a reliable calculation.
+//         if historical_barometer_altitude_sbg.len() < 8 {
+//             info!("Not enough SBG data points to detect apogee.");
+//             continue;
+//         }
+
+//         // Get an ordered iterator over the historical data.
+//         let mut buf_sbg = historical_barometer_altitude_sbg.oldest_ordered();
+//         let mut buf_baro = historical_barometer_altitude_baro.oldest_ordered();
+
+//         // --- SBG Apogee Check ---
+//         if let Some(mut prev_reading) = buf_sbg.next() {
+//             let mut avg_sum: f32 = 0.0;
+//             let mut datapoints_used = 0;
+
+//             for current_reading in buf_sbg {
+//                 // Calculate the time difference between measurements in milliseconds.
+//                 let time_diff_ms = (current_reading.1.as_millis() - prev_reading.1.as_millis());
+//                 info!("time diff: {}", time_diff_ms);
+//                 if time_diff_ms == 0 {
+//                     continue; // Avoid division by zero.
+//                 }
+
+//                 // Calculate slope (vertical speed) and immediately convert it to m/s.
+//                 // Formula: (delta_altitude_meters / delta_time_ms) * 1000 ms/s = speed_m/s
+//                 let slope_mps = ((current_reading.0 - prev_reading.0) / time_diff_ms as f32);
+//                 info!("SBG Slope: {} m/s", slope_mps);
+                
+//                 // Lockout check: if the rocket is ascending too fast, ignore this data point.
+//                 // This assumes ASCENT_LOCKOUT is defined in m/s.
+//                 if slope_mps > ASCENT_LOCKOUT {
+//                     continue;
+//                 }
+
+//                 avg_sum += slope_mps;
+//                 datapoints_used += 1;
+//                 prev_reading = current_reading; // Update for the next iteration.
+//             }
+
+//             // Check if we have enough valid data points for an average.
+//             if datapoints_used >= DATA_POINTS / 2 {
+//                 let avg_slope_mps = avg_sum / (datapoints_used as f32);
+                
+//                 // Apogee condition: if the average vertical speed indicates a sufficient descent.
+//                 // This assumes VALID_DESCENT_RATE is a negative value in m/s (e.g., -5.0).
+//                 if avg_slope_mps <= VALID_DESCENT_RATE {
+//                     info!(
+//                         "SBG Apogee detected! Average vertical speed: {} m/s",
+//                         avg_slope_mps
+//                     );
+//                     // Send an Apogee event to the state machine.
+//                     if EVENT_CHANNEL.try_send(crate::state_machine::Events::Apogee).is_err() {
+//                         // If sending fails, log it. This is a critical failure.
+//                         todo!("Log failure to radio");
+//                     }
+//                     break; // Exit the loop once apogee is detected.
+//                 }
+//             }
+//         }
+
+//         // --- Barometer Apogee Check ---
+//         // This logic is duplicated for the second sensor.
+//         if let Some(mut prev_reading) = buf_baro.next() {
+//             let mut avg_sum: f32 = 0.0;
+//             let mut datapoints_used = 0;
+
+//             for current_reading in buf_baro {
+//                 let time_diff_ms = current_reading.1.as_millis() - prev_reading.1.as_millis();
+
+//                 if time_diff_ms == 0 {
+//                     continue;
+//                 }
+
+//                 // Calculate and convert slope to m/s, same as for the SBG.
+//                 let slope_mps = ((current_reading.0 - prev_reading.0) / time_diff_ms as f32) * 1000.0;
+//                 // info!("Baro Slope: {} m/s", slope_mps);
+
+//                 if slope_mps > ASCENT_LOCKOUT {
+//                     continue;
+//                 }
+
+//                 avg_sum += slope_mps;
+//                 datapoints_used += 1;
+//                 prev_reading = current_reading;
+//             }
+
+//             if datapoints_used >= DATA_POINTS / 2 {
+//                 let avg_slope_mps = avg_sum / (datapoints_used as f32);
+                
+//                 if avg_slope_mps <= VALID_DESCENT_RATE {
+//                     // info!(
+//                     //     "Baro Apogee detected! Average vertical speed: {} m/s",
+//                     //     avg_slope_mps
+//                     // );
+//                     // Consider sending the Apogee event here as well, or having a voting system.
+//                 }
+//             }
+//         }
+//     }
+// }
 #[embassy_executor::task]
 pub async fn recovery_algorithm_task() {
     info!("Barometer reader task started.");
 
+    // --- CONFIGURATION CONSTANTS ---
+    // The number of consecutive negative slope readings required to confirm descent.
+    const CONSECUTIVE_NEGATIVE_THRESHOLD: usize = 3;
 
+    // History buffers to store recent altitude readings from two different sources.
+    // Each entry is a tuple of (altitude, timestamp).
     let mut historical_barometer_altitude_sbg: HistoryBuffer<(f32, Instant), 8> =
         HistoryBuffer::new();
     let mut historical_barometer_altitude_baro: HistoryBuffer<(f32, Instant), 8> =
         HistoryBuffer::new();
 
-    let ignore_baro = false;
-    let ignore_sbg = false;
-
     loop {
-        let baro_apogee_detected = false;
-        let sbg_apogee_detected = false;
-
+        // Wait for a new pressure reading from the channel.
         let reading: (f32, f32, u8, Instant) = PRESSURE_CHANNEL.receive().await;
-        // Hypsometric Formula
+        
+        // This variable will hold the calculated altitude.
         let mut altitude = 0.0;
-        if reading.2 == 1 {
+
+        // Process the reading based on its source identifier.
+        if reading.2 == 1 { // Source is the barometer (baro)
+            // Hypsometric Formula to convert pressure and temperature to altitude.
             altitude =
                 ((powf(101.325 / reading.0, 1.0 / 5.257) - 1.0) * (reading.1 + 273.15)) / 0.0065;
-            info!("Baro Altitude data {}, {}", altitude, reading.3);
             historical_barometer_altitude_baro.write((altitude, reading.3));
-        } else if reading.2 == 0 {
-            info!("SBG Altitude data {}, {}", reading.0, reading.3);
-            altitude = reading.0;
+        } else if reading.2 == 0 { // Source is the SBG
+            altitude = reading.0; // SBG provides altitude directly.
+            info!("Altitude: {}", altitude);
             historical_barometer_altitude_sbg.write((altitude, reading.3));
         }
 
-        // Apogee detection logic
+        // --- Apogee Detection Logic ---
+        // Ensure there are enough data points in the buffer to perform a reliable calculation.
         if historical_barometer_altitude_sbg.len() < 8 {
-            info!("not enough data points to detect apogee");
             continue;
         }
 
-        // if historical_barometer_altitude_baro.len() < 8 {
-        //     info!("not enough data points to detect apogee");
-        //     continue;
-        // }
-
-        let buf_sbg = historical_barometer_altitude_sbg.oldest_ordered();
+        // Get an ordered iterator over the historical data.
+        let mut buf_sbg = historical_barometer_altitude_sbg.oldest_ordered();
         let mut buf_baro = historical_barometer_altitude_baro.oldest_ordered();
 
-        // if buf_sbg.last().unwrap().1.duration_since(buf_sbg.last().unwrap().1) > SENSOR_TIMEOUT {
-        //     ignore_sbg = true;
-        // } else {
-        //     info!("SBG data is valid, proceeding with apogee detection");
-        //     ignore_sbg = false;
-        // }
+        // --- SBG Apogee Check ---
+        if let Some(mut prev_reading) = buf_sbg.next() {
+            // This buffer will store the calculated slopes (max 7 slopes from 8 points).
+            let mut slopes: HistoryBuffer<f32, 7> = HistoryBuffer::new();
 
-        // if buf_baro.last().unwrap().1.duration_since(buf_baro.last().unwrap().1) > SENSOR_TIMEOUT {
-        //     ignore_baro = true;
-        // } else {
-        //     ignore_baro = false;
-        // }
-
-        if let Some(mut prev_reading) = buf_baro.next() {
-            // `prev_reading` is now a tuple: (f32, Instant)
-            let mut avg_sum: f32 = 0.0;
-            let mut datapoints_used = 0;
-
+            // First, iterate through the altitude history and calculate the slope between each point.
             for current_reading in buf_sbg {
-                // `current_reading` is also a tuple
-                // Calculate time diff between the actual measurement times.
-                // Convert from micros to seconds for a more standard rate unit (meters/sec).
-                let time_diff = current_reading.1.duration_since(prev_reading.1).as_millis();
-
-                // info!(
-                //     "prev alt: {}, new alt: {}, time diff: {} ms",
-                //     prev_reading.0, current_reading.0, time_diff
-                // );
-
-                if time_diff == 0 {
-                    continue; // Avoid division by zero
+                let time_diff_ms = current_reading.1.duration_since(prev_reading.1).as_millis();
+                if time_diff_ms > 0 {
+                    let slope_mpms = (current_reading.0 - prev_reading.0) / time_diff_ms as f32;
+                    // Optional: Add ascent lockout here if needed
+                    // if slope_mpms > ASCENT_LOCKOUT { continue; }
+                    slopes.write(slope_mpms);
                 }
-
-                let slope = (current_reading.0 - prev_reading.0) / time_diff as f32;
-                // info!("Slope: {} m/ms", slope);
-                // Your existing logic for ascent lockout
-                if slope > ASCENT_LOCKOUT {
-                    continue;
-                }
-
-                avg_sum += slope;
-                datapoints_used += 1;
-                prev_reading = current_reading; // Update to the current reading for the next iteration
+                prev_reading = current_reading;
             }
 
-            // Check if the average descent rate is valid
-            if datapoints_used >= DATA_POINTS / 2 {
-                let avg_slope = avg_sum / (datapoints_used as f32);
-                // info!("Average slope: {} m/ms", avg_slope);
-                if avg_slope <= VALID_DESCENT_RATE {
-                    info!(
-                        "SBG Apogee detected! Average vertical speed: {} m/s",
-                        avg_slope * 1000.0
-                    );
-                    match EVENT_CHANNEL.try_send(crate::state_machine::Events::Apogee) {
-                        Err(_) => {
-                            // log event to radio. give up firing control to the COTS backup.
+            // Ensure we have enough slopes to check for a consecutive sequence.
+            if slopes.len() >= CONSECUTIVE_NEGATIVE_THRESHOLD {
+                // Collect slopes into a vector to easily access the most recent items from the end.
+                // In a `no_std` environment, this would typically be a `heapless::Vec`.
+                let slopes_vec: Vec<_, DATA_POINTS> = slopes.oldest_ordered().collect();
+                let mut consecutive_negative_count = 0;
+                let mut sum_of_recent_slopes = 0.0;
+
+                // Check if the last N slopes are all negative by iterating backwards from the end.
+                for slope in slopes_vec.iter().rev().take(CONSECUTIVE_NEGATIVE_THRESHOLD) {
+                    if **slope <= 0.0 {
+                        consecutive_negative_count += 1;
+                        sum_of_recent_slopes += *slope;
+                    } else {
+                        break; // Sequence is broken by a positive slope.
+                    }
+                }
+
+                // If we found a consecutive sequence of negative slopes, check for apogee.
+                if consecutive_negative_count == CONSECUTIVE_NEGATIVE_THRESHOLD {
+                    let avg_slope_mpms = sum_of_recent_slopes / CONSECUTIVE_NEGATIVE_THRESHOLD as f32;
+                    
+                    if avg_slope_mpms <= VALID_DESCENT_RATE {
+                        info!(
+                            "SBG Apogee detected! Avg speed of last {} readings: {} m/s",
+                            CONSECUTIVE_NEGATIVE_THRESHOLD,
+                            avg_slope_mpms * 1000.0 // Convert to m/s for logging
+                        );
+                        
+                        if EVENT_CHANNEL.try_send(crate::state_machine::Events::Apogee).is_err() {
                             todo!("Log failure to radio");
                         }
-                        _ => {}
+                        break; // Exit loop once apogee is detected.
                     }
-                    break; 
                 }
             }
         }
 
+        // --- Barometer Apogee Check (Identical logic) ---
         if let Some(mut prev_reading) = buf_baro.next() {
-            // `prev_reading` is now a tuple: (f32, Instant)
-            let mut avg_sum: f32 = 0.0;
-            let mut datapoints_used = 0;
+            let mut slopes: HistoryBuffer<f32, 7> = HistoryBuffer::new();
 
             for current_reading in buf_baro {
-                // `current_reading` is also a tuple
-                // Calculate time diff between the actual measurement times.
-                // Convert from micros to seconds for a more standard rate unit (meters/sec).
-                let time_diff = current_reading.1.duration_since(prev_reading.1).as_millis();
-
-                // info!(
-                //     "prev alt: {}, new alt: {}, time diff: {} ms",
-                //     prev_reading.0, current_reading.0, time_diff
-                // );
-
-                if time_diff == 0 {
-                    continue; // Avoid division by zero
+                let time_diff_ms = current_reading.1.duration_since(prev_reading.1).as_millis();
+                if time_diff_ms > 0 {
+                    let slope_mpms = (current_reading.0 - prev_reading.0) / time_diff_ms as f32;
+                    slopes.write(slope_mpms);
                 }
-
-                let slope = (current_reading.0 - prev_reading.0) / time_diff as f32;
-                // info!("Slope: {} m/ms", slope);
-                // Your existing logic for ascent lockout
-                if slope > ASCENT_LOCKOUT {
-                    continue;
-                }
-
-                avg_sum += slope;
-                datapoints_used += 1;
-                prev_reading = current_reading; // Update to the current reading for the next iteration
+                prev_reading = current_reading;
             }
 
-            // Check if the average descent rate is valid
-            if datapoints_used >= DATA_POINTS / 2 {
-                let avg_slope = avg_sum / (datapoints_used as f32);
-                // info!("Average slope: {} m/ms", avg_slope);
-                if avg_slope <= VALID_DESCENT_RATE {
-                    info!(
-                        "Baro Apogee detected! Average vertical speed: {} m/s",
-                        avg_slope * 1000.0
-                    );
+            if slopes.len() >= CONSECUTIVE_NEGATIVE_THRESHOLD {
+                let slopes_vec: Vec<_, DATA_POINTS> = slopes.oldest_ordered().collect();
+                let mut consecutive_negative_count = 0;
+                let mut sum_of_recent_slopes = 0.0;
+
+                for slope in slopes_vec.iter().rev().take(CONSECUTIVE_NEGATIVE_THRESHOLD) {
+                    if **slope <= 0.0 {
+                        consecutive_negative_count += 1;
+                        sum_of_recent_slopes += *slope;
+                    } else {
+                        break;
+                    }
+                }
+
+                if consecutive_negative_count == CONSECUTIVE_NEGATIVE_THRESHOLD {
+                    let avg_slope_mpms = sum_of_recent_slopes / CONSECUTIVE_NEGATIVE_THRESHOLD as f32;
+                    
+                    if avg_slope_mpms <= VALID_DESCENT_RATE {
+                        info!(
+                            "Baro Apogee detected! Avg speed of last {} readings: {} m/s",
+                            CONSECUTIVE_NEGATIVE_THRESHOLD,
+                            avg_slope_mpms * 1000.0
+                        );
+                        // Consider sending event or using a voting system with the SBG.
+                    }
                 }
             }
         }
+        Timer::after_millis(25).await;
     }
 }

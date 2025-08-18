@@ -1,6 +1,6 @@
 use defmt::info;
 use embassy_executor::Spawner;
-use embassy_time::Instant;
+use embassy_time::{Instant, Timer};
 use messages_prost::phoenix_state::{Event, State};
 use smlang::statemachine;
 use messages_prost::prost::Message;
@@ -65,7 +65,6 @@ pub async fn sm_task(spawner: Spawner, mut state_machine: StateMachine<Context>)
                 msg.encode_length_delimited(&mut buf.as_mut()).unwrap();
                 RADIO_CHANNEL.send(buf.clone()).await;
                 SD_CHANNEL.send(("state.txt", buf)).await;
-                info!("Ascent");
             }
             States::Fault => {
                 let mut buf: [u8; 255] = [0; 255];
@@ -80,7 +79,6 @@ pub async fn sm_task(spawner: Spawner, mut state_machine: StateMachine<Context>)
                 msg.encode_length_delimited(&mut buf.as_mut()).unwrap();
                 RADIO_CHANNEL.send(buf.clone()).await;
                 SD_CHANNEL.send(("state.txt", buf)).await;
-                info!("Fault");
             }
             States::Init => {
                 let mut buf: [u8; 255] = [0; 255];
@@ -124,7 +122,6 @@ pub async fn sm_task(spawner: Spawner, mut state_machine: StateMachine<Context>)
                     RADIO_CHANNEL.send(buf.clone()).await;
                     SD_CHANNEL.send(("event.txt", buf)).await; 
                 }
-                info!("Init");
             }
             States::WaitForLaunch => {
                 let mut buf: [u8; 255] = [0; 255];
@@ -139,7 +136,6 @@ pub async fn sm_task(spawner: Spawner, mut state_machine: StateMachine<Context>)
                 msg.encode_length_delimited(&mut buf.as_mut()).unwrap();
                 RADIO_CHANNEL.send(buf.clone()).await;
                 SD_CHANNEL.send(("state.txt", buf)).await; 
-                info!("Wait For Launch");
             }
             States::Descent => {
                 RECOVERY_MANAGER.lock(|cell| {
@@ -262,5 +258,7 @@ pub async fn sm_task(spawner: Spawner, mut state_machine: StateMachine<Context>)
                 SD_CHANNEL.send(("state.txt", buf)).await; 
             }
         }
+
+        Timer::after_millis(100).await;
     }
 }

@@ -2,6 +2,7 @@ use crate::bindings::{
     SbgLogAirData, SbgLogEkfNavData, SbgLogEkfQuatData, SbgLogGpsPos, SbgLogGpsVel, SbgLogImuData,
     SbgLogUtcData,
 };
+use defmt::info;
 use messages_prost::sensor::sbg::{
     Air, AirData, AirStatus, AirStatusFlag, EkfNav, EkfPositionData, EkfQuat, EkfStatus,
     EkfStatusFlag, EkfVelocityData, GpsPos, GpsPosData, GpsPositionStatus, GpsPositionStatusE,
@@ -55,7 +56,10 @@ impl From<SbgLogGpsPos> for GpsPos {
             r#type: GpsPositionType::Unspecified as i32, // Adjust as needed
         };
         let valid = status.status == GpsPositionStatusE::SolComputed as i32;
-        let data = if valid {
+            info!("Gps message sbg {}, {}", value.latitude, value.longitude);
+        
+        let data = 
+        // if valid {
             Some(GpsPosData {
                 latitude: value.latitude,
                 longitude: value.longitude,
@@ -68,10 +72,10 @@ impl From<SbgLogGpsPos> for GpsPos {
                 num_sv_used: value.numSvUsed as u32,
                 base_station_id: value.baseStationId as u32,
                 differential_age: value.differentialAge as u32,
-            })
-        } else {
-            None
-        };
+            });
+        // } else {
+            // None
+        // };
         GpsPos {
             time_stamp: value.timeStamp,
             status: Some(status),
