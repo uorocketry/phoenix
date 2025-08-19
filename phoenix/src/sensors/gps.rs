@@ -139,13 +139,12 @@
 //     }
 // }
 
-
-use crate::resources::{Irqs, GPS_BUFFER_SIZE, RX_GPS_BUF, SD_CHANNEL, RADIO_CHANNEL};
+use crate::resources::{Irqs, GPS_BUFFER_SIZE, RADIO_CHANNEL, RX_GPS_BUF, SD_CHANNEL};
 use defmt::info;
 use embassy_stm32::gpio::{Level, Output, Speed};
+use embassy_stm32::mode;
 use embassy_stm32::peripherals::{DMA1_CH5, DMA1_CH6, PA4, PB2, PE0, PE1, UART8};
 use embassy_stm32::usart::{Config, RingBufferedUartRx, Uart, UartTx};
-use embassy_stm32::mode;
 use embassy_time::{Delay, Instant};
 use embedded_hal_1::delay::DelayNs;
 use messages_prost::gps::Gps;
@@ -153,7 +152,9 @@ use messages_prost::prost::Message;
 use ublox::cfg_val::{CfgKey, CfgVal};
 use ublox::nav_pvt_proto14::NavPvt;
 use ublox::PacketRef;
-use ublox::{CfgLayerSet, CfgRstBuilder, CfgValSetBuilder, ResetMode, UbxPacketRequest, NavBbrMask};
+use ublox::{
+    CfgLayerSet, CfgRstBuilder, CfgValSetBuilder, NavBbrMask, ResetMode, UbxPacketRequest,
+};
 
 /// #
 /// # Setup and configure the U-BLOX GPS Module
@@ -178,10 +179,10 @@ pub async fn setup_gps(
     // --- Initialize GPIOs and UART ---
     let mut gps_enable = Output::new(gps_enable, Level::High, Speed::Low);
     let mut gps_reset = Output::new(gps_reset, Level::High, Speed::Low);
-    
+
     let mut uart_gps_config = Config::default();
     uart_gps_config.baudrate = 9600; // Default baud rate for the module
-    // Other UART settings are correct by default (8N1)
+                                     // Other UART settings are correct by default (8N1)
 
     let uart_gps = Uart::new(uart, rx, tx, irqs, tx_dma, rx_dma, uart_gps_config).unwrap();
     let (mut gps_tx, gps_rx) = uart_gps.split();
@@ -212,11 +213,9 @@ pub async fn setup_gps(
             CfgVal::Uart1InProtNmea(false),
             CfgVal::Uart1OutProtUbx(true),
             CfgVal::Uart1OutProtNmea(false),
-            
             // --- Message Settings: Enable NAV-PVT on UART1 ---
             // The '1' means the message will be sent once per navigation solution.
             CfgVal::MsgOutUbxNavPvtUart1(1),
-
             // --- Rate Settings: Set navigation rate to 1 Hz ---
             CfgVal::RateMeas(1000), // 1000ms = 1Hz
             CfgVal::RateNav(1),     // Navigation rate matches measurement rate
@@ -225,7 +224,10 @@ pub async fn setup_gps(
     .into_packet_vec();
 
     info!("Sending GPS configuration packet...");
-    gps_tx.write(&config_packet).await.expect("Failed to send GPS config");
+    gps_tx
+        .write(&config_packet)
+        .await
+        .expect("Failed to send GPS config");
     Delay.delay_ms(250); // Give module time to process the config
 
     // --- Software Reset to Apply Configuration ---
@@ -241,7 +243,7 @@ pub async fn setup_gps(
     info!("Sending software reset to apply configuration...");
     gps_tx.write(&reset_packet).await.unwrap();
     Delay.delay_ms(500); // Give module time to reset and apply settings
-    
+
     info!("GPS setup complete. Module is now streaming NAV-PVT packets.");
 
     (ring_gps_rx, gps_tx)
@@ -262,7 +264,7 @@ pub async fn uart_gps_dma_reader_task(
     info!("GPS reader task spawned.");
     let mut parser_buf: [u8; GPS_BUFFER_SIZE] = [0; GPS_BUFFER_SIZE];
     let mut read_buf: [u8; GPS_BUFFER_SIZE] = [0; GPS_BUFFER_SIZE];
-    
+
     // Create a parser to handle the incoming UBX byte stream
     let buf = ublox::FixedLinearBuffer::new(&mut parser_buf[..]);
     let mut parser = ublox::Parser::new(buf);
@@ -274,7 +276,7 @@ pub async fn uart_gps_dma_reader_task(
             if bytes_read > 0 {
                 // Feed the received bytes into the parser
                 let mut it = parser.consume_ubx(&read_buf[..bytes_read]);
-                
+
                 // Iterate through any fully parsed packets
                 while let Some(packet) = it.next() {
                     match packet {
@@ -282,9 +284,25 @@ pub async fn uart_gps_dma_reader_task(
                             // We successfully parsed a NAV-PVT packet!
                             // Now you can use the structured data.
                             info!("Received and Parsed NAV-PVT:");
-                            info!("  Timestamp: {:?}-{:?}-{:?} {:?}:{:?}:{:?} UTC", pvt.year(), pvt.month(), pvt.day(), pvt.hour(), pvt.min(), pvt.sec());
-                            info!("  Fix Sats: {:?}, Fix Type: {:?}", pvt.num_satellites(), pvt.fix_type() as u8);
-                            info!("  Coords (deg): lon={}, lat={}", pvt.longitude() as f32 * 1e-7, pvt.latitude() as f32 * 1e-7);
+                            info!(
+                                "  Timestamp: {:?}-{:?}-{:?} {:?}:{:?}:{:?} UTC",
+                                pvt.year(),
+                                pvt.month(),
+                                pvt.day(),
+                                pvt.hour(),
+                                pvt.min(),
+                                pvt.sec()
+                            );
+                            info!(
+                                "  Fix Sats: {:?}, Fix Type: {:?}",
+                                pvt.num_satellites(),
+                                pvt.fix_type() as u8
+                            );
+                            info!(
+                                "  Coords (deg): lon={}, lat={}",
+                                pvt.longitude() as f32 * 1e-7,
+                                pvt.latitude() as f32 * 1e-7
+                            );
 
                             // TODO: Adapt this section to your specific needs.
                             // Instead of sending the raw buffer, you should now create your
@@ -296,7 +314,7 @@ pub async fn uart_gps_dma_reader_task(
                             //     num_satellites: pvt.num_sv() as u32,
                             //     // ... other fields
                             // };
-                            
+
                             // For demonstration, we'll just log. You can serialize `gps_data`
                             // and send it over your channels here.
                         }

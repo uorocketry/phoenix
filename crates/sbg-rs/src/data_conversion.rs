@@ -56,25 +56,25 @@ impl From<SbgLogGpsPos> for GpsPos {
             r#type: GpsPositionType::Unspecified as i32, // Adjust as needed
         };
         let valid = status.status == GpsPositionStatusE::SolComputed as i32;
-            info!("Gps message sbg {}, {}", value.latitude, value.longitude);
-        
-        let data = 
+        // info!("Gps message sbg {}, {}", value.latitude, value.longitude);
+
+        let data = Some(GpsPosData {
+            latitude: value.latitude,
+            longitude: value.longitude,
+            time_of_week: value.timeOfWeek,
+            undulation: value.undulation,
+            altitude: value.altitude,
+            latitude_accuracy: value.latitudeAccuracy,
+            longitude_accuracy: value.longitudeAccuracy,
+            altitude_accuracy: value.altitudeAccuracy,
+            num_sv_used: value.numSvUsed as u32,
+            base_station_id: value.baseStationId as u32,
+            differential_age: value.differentialAge as u32,
+        });
         // if valid {
-            Some(GpsPosData {
-                latitude: value.latitude,
-                longitude: value.longitude,
-                time_of_week: value.timeOfWeek,
-                undulation: value.undulation,
-                altitude: value.altitude,
-                latitude_accuracy: value.latitudeAccuracy,
-                longitude_accuracy: value.longitudeAccuracy,
-                altitude_accuracy: value.altitudeAccuracy,
-                num_sv_used: value.numSvUsed as u32,
-                base_station_id: value.baseStationId as u32,
-                differential_age: value.differentialAge as u32,
-            });
+
         // } else {
-            // None
+        // None
         // };
         GpsPos {
             time_stamp: value.timeStamp,

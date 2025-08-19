@@ -57,21 +57,11 @@ pub async fn radio_reader_task(mut rx: RingBufferedUartRx<'static>) {
                                 // info!("Received radio frame: {:?}", recv.node);
                                 if let Some(payload) = recv.payload {
                                     match payload {
-                                        Payload::ArgusTemperature(_) => {
-                                            
-                                        }
-                                        Payload::ArgusStrain(_) => {
-
-                                        }
-                                        Payload::ArgusPressure(_) => {
-
-                                        }
-                                        Payload::ArgusEvent(_) => {
-
-                                        }
-                                        Payload::ArgusState(_) => {
-
-                                        }
+                                        Payload::ArgusTemperature(_) => {}
+                                        Payload::ArgusStrain(_) => {}
+                                        Payload::ArgusPressure(_) => {}
+                                        Payload::ArgusEvent(_) => {}
+                                        Payload::ArgusState(_) => {}
                                         Payload::Sbg(sbg_data) => {
                                             info!(
                                                 "Received SBG data: {:?}",
@@ -104,9 +94,7 @@ pub async fn radio_reader_task(mut rx: RingBufferedUartRx<'static>) {
                                             info!("Received State message: {:?}", state);
                                             // Handle State message
                                         }
-                                        Payload::PhoenixEvent(event) => {
-                                            
-                                        }
+                                        Payload::PhoenixEvent(event) => {}
                                         Payload::Barometer(barometer_data) => {
                                             // Handle Barometer data
                                         }
@@ -135,7 +123,6 @@ pub async fn radio_reader_task(mut rx: RingBufferedUartRx<'static>) {
                                                                             id: ping.id,
                                                                         }
                                                                     )),
-                                                                    
                                                                 }
                                                             )),
                                                             millis_since_start: Instant::now().as_millis()
@@ -218,7 +205,7 @@ pub async fn radio_reader_task(mut rx: RingBufferedUartRx<'static>) {
 
 #[embassy_executor::task]
 pub async fn radio_writer_task(mut tx: UartTx<'static, mode::Async>) {
-    let mut sequence = 0; 
+    let mut sequence = 0;
 
     loop {
         let data = RADIO_CHANNEL.receive().await;
@@ -238,7 +225,8 @@ pub async fn radio_writer_task(mut tx: UartTx<'static, mode::Async>) {
             mav_header,
             &mav_message,
         )
-        .await {
+        .await
+        {
             Ok(bytes) => {
                 sequence = sequence.wrapping_add(1);
             }
@@ -246,7 +234,5 @@ pub async fn radio_writer_task(mut tx: UartTx<'static, mode::Async>) {
                 info!("Failed to write");
             }
         }
-
-
     }
 }

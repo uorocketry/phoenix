@@ -7,7 +7,9 @@ use core::ptr;
 // use crate::app::sbg_sd_task as sbg_sd;
 // use crate::app::sbg_write_data;
 use super::sbg_manager;
-use crate::resources::{BUFFER_CHANNEL, PRESSURE_CHANNEL, RADIO_CHANNEL, RTC, SBG_CHANNEL, SD_CHANNEL};
+use crate::resources::{
+    BUFFER_CHANNEL, PRESSURE_CHANNEL, RADIO_CHANNEL, RTC, SBG_CHANNEL, SD_CHANNEL,
+};
 use crate::HEAP;
 use chrono::NaiveDateTime;
 use defmt::info;
@@ -58,13 +60,13 @@ pub async fn sbg_receiver_task() {
                 let msg = messages_prost::radio::RadioFrame {
                     node: messages_prost::common::Node::Phoenix.into(),
                     payload: Some(messages_prost::radio::radio_frame::Payload::Sbg(data)),
-                    millis_since_start: Instant::now().as_millis()
+                    millis_since_start: Instant::now().as_millis(),
                 };
                 msg.encode_length_delimited(&mut buf.as_mut())
                     .expect("Failed to encode SBG GPS Position");
                 RADIO_CHANNEL.send(buf.clone()).await;
 
-                SD_CHANNEL.send(("sbg.txt", buf)).await; 
+                SD_CHANNEL.send(("sbg.txt", buf)).await;
             }
             None => {
                 info!("No SBG data received");

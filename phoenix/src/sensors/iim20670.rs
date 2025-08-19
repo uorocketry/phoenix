@@ -67,7 +67,10 @@ where
         self.set_bank(1)?;
         let whoami_val = self.read_reg(WHO_AM_I)?;
         if (whoami_val as u8) != 0xF3 {
-            warn!("WHO_AM_I check failed. Expected 0xF3, got {:#02x}", whoami_val);
+            warn!(
+                "WHO_AM_I check failed. Expected 0xF3, got {:#02x}",
+                whoami_val
+            );
             return Err(Error::WhoAmI);
         }
         info!("WHO_AM_I check passed.");
@@ -123,18 +126,29 @@ where
 
         // First transfer (request)
         let mut rx_buf = [0u8; 4];
-        self.spi.transaction(&mut [Operation::Transfer(&mut rx_buf, &tx_buf)]).map_err(Error::Spi)?;
-        
+        self.spi
+            .transaction(&mut [Operation::Transfer(&mut rx_buf, &tx_buf)])
+            .map_err(Error::Spi)?;
+
         self.delay.delay_ms(1);
 
         // Second transfer (fetch data)
-        self.spi.transaction(&mut [Operation::Transfer(&mut rx_buf, &tx_buf)]).map_err(Error::Spi)?;
+        self.spi
+            .transaction(&mut [Operation::Transfer(&mut rx_buf, &tx_buf)])
+            .map_err(Error::Spi)?;
 
         // Status is in the LSBs of the first received byte
         let status = rx_buf[0] & 0b11;
-        if status != 0b01 { // 0b01 is success
-            warn!("Read from reg {:#02x} failed. Status: {:#04b}, Response: {=[u8]:#02x}", reg, status, rx_buf);
-            return Err(Error::BadResponse { response: rx_buf, status });
+        if status != 0b01 {
+            // 0b01 is success
+            warn!(
+                "Read from reg {:#02x} failed. Status: {:#04b}, Response: {=[u8]:#02x}",
+                reg, status, rx_buf
+            );
+            return Err(Error::BadResponse {
+                response: rx_buf,
+                status,
+            });
         }
 
         // Data is in the second and third bytes
@@ -149,19 +163,28 @@ where
         tx_buf[1] = data_bytes[0]; // Data MSB
         tx_buf[2] = data_bytes[1]; // Data LSB
         tx_buf[3] = self.calculate_crc(&[tx_buf[0], tx_buf[1], tx_buf[2]]);
-        
+
         let mut rx_buf = [0u8; 4];
-        self.spi.transaction(&mut [Operation::Transfer(&mut rx_buf, &tx_buf)]).map_err(Error::Spi)?;
-        
+        self.spi
+            .transaction(&mut [Operation::Transfer(&mut rx_buf, &tx_buf)])
+            .map_err(Error::Spi)?;
+
         // Status is in the LSBs of the first received byte
         let status = rx_buf[0] & 0b11;
-        if status != 0b01 && reg != RESET_CONTROL { // 0b01 is success
-            warn!("Write to reg {:#02x} failed. Status: {:#04b}, Response: {=[u8]:#02x}", reg, status, rx_buf);
-            return Err(Error::BadResponse { response: rx_buf, status });
+        if status != 0b01 && reg != RESET_CONTROL {
+            // 0b01 is success
+            warn!(
+                "Write to reg {:#02x} failed. Status: {:#04b}, Response: {=[u8]:#02x}",
+                reg, status, rx_buf
+            );
+            return Err(Error::BadResponse {
+                response: rx_buf,
+                status,
+            });
         }
         Ok(())
     }
-    
+
     /// Switches the active register bank.
     fn set_bank(&mut self, bank: u16) -> Result<(), Error<SPI::Error>> {
         self.write_reg(BANK_SELECT, bank)
@@ -211,8 +234,12 @@ where
                 let crc_msb = (crc & 0x80) != 0;
                 let data_msb = (current_byte & 0x80) != 0;
                 crc <<= 1;
-                if data_msb { crc |= 1; }
-                if crc_msb { crc ^= poly; }
+                if data_msb {
+                    crc |= 1;
+                }
+                if crc_msb {
+                    crc ^= poly;
+                }
                 current_byte <<= 1;
             }
         }

@@ -18,19 +18,19 @@ mod state_machine;
 use core::cell::RefCell;
 
 use defmt::*;
-use embassy_stm32::wdg::IndependentWatchdog;
-use messages_prost::prost::Message;
-use embedded_hal_1::delay::DelayNs;
 use embassy_executor::Spawner;
-use embassy_stm32::gpio::{Level, Output, OutputType, Speed};
-use embassy_stm32::{mode, peripherals};
+use embassy_stm32::gpio::{Input, Level, Output, OutputType, Pull, Speed};
 use embassy_stm32::spi::{Config as SpiConfig, Spi};
 use embassy_stm32::time::{khz, mhz};
 use embassy_stm32::timer::simple_pwm::{PwmPin, SimplePwm};
 use embassy_stm32::usart::{Config as UartConfig, Uart};
+use embassy_stm32::wdg::IndependentWatchdog;
+use embassy_stm32::{mode, peripherals};
 use embassy_time::{Delay, Duration, Instant, Timer};
+use embedded_hal_1::delay::DelayNs;
 use embedded_hal_bus::spi::RefCellDevice;
 use messages_prost::phoenix_state::Event;
+use messages_prost::prost::Message;
 use static_cell::StaticCell;
 // use embedded_alloc::Heap;
 use crate::state_machine::StateMachine;
@@ -44,13 +44,19 @@ use common_arm::drivers::ms5611::Ms5611;
 use crate::camera::Cameras;
 use crate::communication::{radio_reader_task, radio_writer_task};
 use crate::recovery::RecoveryManager;
-use crate::resources::{Irqs, EVENT_CHANNEL, HEAP, RADIO_CHANNEL, RECOVERY_MANAGER, RX_SBG_BUF, SD_CHANNEL};
+use crate::resources::{
+    Irqs, EVENT_CHANNEL, HEAP, RADIO_CHANNEL, RECOVERY_MANAGER, RX_SBG_BUF, SD_CHANNEL,
+};
 
 pub static IMU_BUS_CELL: StaticCell<RefCell<Spi<mode::Blocking>>> = StaticCell::new();
 
-
 #[embassy_executor::task]
-async fn imu_task(mut imu: sensors::iim20670::Iim20670<RefCellDevice<'static, Spi<'static, mode::Blocking>, Output<'static>, Delay>, Delay>) {
+async fn imu_task(
+    mut imu: sensors::iim20670::Iim20670<
+        RefCellDevice<'static, Spi<'static, mode::Blocking>, Output<'static>, Delay>,
+        Delay,
+    >,
+) {
     if imu.init().is_ok() {
         loop {
             if let Ok(accel) = imu.read_accel() {
@@ -126,21 +132,20 @@ async fn main(spawner: Spawner) {
 
     // --- IMU Setup ---
     // embassy_stm32::rcc::enable_and_reset::<peripherals::SPI3>();
-    let mut spi_config = SpiConfig::default();
-    spi_config.frequency = mhz(10); // Max 10 MHz for IIM-20670
-    let imu_spi = Spi::new_blocking(
-        p.SPI3,
-        p.PB3, // SCK
-        p.PB5, // MOSI
-        p.PB4, // MISO
-        spi_config,
-    );
-    let imu_cs = Output::new(p.PA15, Level::Low, Speed::Low);
-    let imu_nreset = Output::new(p.PD4, Level::High, Speed::Low);
-    let imu_bus_ref = IMU_BUS_CELL.init(RefCell::new(imu_spi));
-    let imu_spi_device = RefCellDevice::new(imu_bus_ref, imu_cs, Delay).unwrap();
-    let mut imu = sensors::iim20670::Iim20670::new(imu_spi_device, Delay);
-
+    // let mut spi_config = SpiConfig::default();
+    // spi_config.frequency = mhz(1); // Max 10 MHz for IIM-20670
+    // let mut imu_spi = Spi::new_blocking(
+    //     p.SPI3, p.PB3, // SCK
+    //     p.PB5, // MOSI
+    //     p.PB4, // MISO
+    //     spi_config,
+    // );
+    // let imu_odr = Input::new(p.PC0, Pull::None);
+    // let imu_cs = Output::new(p.PA15, Level::Low, Speed::Low);
+    // let imu_nreset = Output::new(p.PD4, Level::High, Speed::Low);
+    // let imu_bus_ref = IMU_BUS_CELL.init(RefCell::new(imu_spi));
+    // let imu_spi_device = RefCellDevice::new(imu_bus_ref, imu_cs, Delay).unwrap();
+    // let mut imu = sensors::iim20670::Iim20670::new(imu_spi_device, Delay);
 
     // --- SBG Setup ---
     let mut uart_config = UartConfig::default();
@@ -186,7 +191,7 @@ async fn main(spawner: Spawner) {
     .await;
 
     // --- Recovery manager ---
-    let recovery_manager = RecoveryManager::new(
+    let mut recovery_manager = RecoveryManager::new(
         p.PD6, p.PD14, p.PC11, p.PD2, p.PD5, p.PD13, p.PC12, p.PD1, p.PA2, p.PB0, p.PA3, p.PC5,
         p.ADC1, p.PC1,
     );
@@ -196,12 +201,12 @@ async fn main(spawner: Spawner) {
     });
 
     // --- Camera Triggers ---
-    let mut cameras = Cameras::new(p.PE14, p.PE12);
+    // let mut cameras = Cameras::new(p.PE14, p.PE12);
 
-    cameras.start_recording();
-    Delay.delay_ms(10_000);
-    cameras.stop_recording();
-    info!("Camera recording started and stopped.");
+    // cameras.start_recording();
+    // Delay.delay_ms(10_000);
+    // cameras.stop_recording();
+    // info!("Camera recording started and stopped.");
 
     // --- Buzzer 🐝 ---
     let buzz_out_pin = PwmPin::new_ch1(p.PC6, OutputType::PushPull);
@@ -228,22 +233,22 @@ async fn main(spawner: Spawner) {
 
     // --- Spawning Tasks ---
     spawner.must_spawn(sensors::sbg_manager::uart_dma_reader_task(ring_rx));
-    spawner.must_spawn(sensors::gps::uart_gps_dma_reader_task(ring_gps_rx, gps_tx));
+    // spawner.must_spawn(sensors::gps::uart_gps_dma_reader_task(ring_gps_rx, gps_tx));
     spawner.must_spawn(sensors::sbg_manager::sbg_parser_task(tx));
     spawner.must_spawn(sensors::sbg_manager::sbg_receiver_task());
     spawner.must_spawn(sensors::baro::baro_reader_task(baro));
     // // spawner.must_spawn(ai::ai_task());
-    spawner.must_spawn(radio_reader_task(radio_ring_rx));
+    // spawner.must_spawn(radio_reader_task(radio_ring_rx));
     spawner.must_spawn(radio_writer_task(radio_tx));
-    spawner.must_spawn(sd::sdmmc_task(sd_card)); 
-    spawner.must_spawn(recovery::recovery_algorithm_task());
+    spawner.must_spawn(sd::sdmmc_task(sd_card));
+    // spawner.must_spawn(recovery::recovery_algorithm_task());
     // spawner.must_spawn(imu_task(imu));
 
     // pass control of the spawner to the state machine
     spawner.must_spawn(state_machine::sm_task(spawner, state_machine));
 
-    // // watch dog with 10 second timeout 
-    // let mut watch_dog = IndependentWatchdog::new(p.IWDG1, 10_000); 
+    // // watch dog with 10 second timeout
+    // let mut watch_dog = IndependentWatchdog::new(p.IWDG1, 10_000);
     // watch_dog.unleash();
 
     info!("Device {} has started.", embassy_stm32::uid::uid_hex());

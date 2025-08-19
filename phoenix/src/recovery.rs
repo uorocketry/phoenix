@@ -11,12 +11,12 @@ use libm::powf;
 
 use crate::resources::{EVENT_CHANNEL, PRESSURE_CHANNEL};
 
-const SENSOR_TIMEOUT: Duration = Duration::from_millis(10_000);
-pub const MAIN_HEIGHT: f32 = GROUND_HEIGHT + 500.0; // meters ASL
-const HEIGHT_MIN: f32 = GROUND_HEIGHT + 300.0; // meters ASL
+pub const MAIN_HEIGHT: f32 = GROUND_HEIGHT + 450.0; // meters ASL
+pub const HEIGHT_MIN: f32 = GROUND_HEIGHT + 300.0; // meters ASL
 const GROUND_HEIGHT: f32 = 300.0; // meters ASL
 const ASCENT_LOCKOUT: f32 = 0.01;
-const DATA_POINTS: usize = 10;
+pub const DATA_POINTS: usize = 15;
+pub const SLOPES: usize = 14; 
 const VALID_DESCENT_RATE: f32 = -0.005; // meters per millise
 
 // --- Boom Boom Setup ---
@@ -132,7 +132,7 @@ impl RecoveryManager {
     pub fn fire_main(&mut self) {
         self.fire.main.set_high();
         self.fire.main_b.set_high();
-        embassy_time::Delay.delay_ms(500);
+        embassy_time::Delay.delay_ms(1000);
         self.fire.main.set_low();
         self.fire.main_b.set_low();
     }
@@ -140,7 +140,7 @@ impl RecoveryManager {
     pub fn fire_drogue(&mut self) {
         self.fire.drogue.set_high();
         self.fire.drogue_b.set_high();
-        embassy_time::Delay.delay_ms(500);
+        embassy_time::Delay.delay_ms(1000);
         self.fire.drogue.set_low();
         self.fire.drogue_b.set_low();
     }
@@ -170,7 +170,7 @@ impl RecoveryManager {
 //         // Wait for a new pressure reading from the channel.
 //         // The reading includes pressure, temperature, a source identifier, and a timestamp.
 //         let reading: (f32, f32, u8, Instant) = PRESSURE_CHANNEL.receive().await;
-        
+
 //         // This variable will hold the calculated altitude.
 //         let mut altitude = 0.0;
 
@@ -214,7 +214,7 @@ impl RecoveryManager {
 //                 // Formula: (delta_altitude_meters / delta_time_ms) * 1000 ms/s = speed_m/s
 //                 let slope_mps = ((current_reading.0 - prev_reading.0) / time_diff_ms as f32);
 //                 info!("SBG Slope: {} m/s", slope_mps);
-                
+
 //                 // Lockout check: if the rocket is ascending too fast, ignore this data point.
 //                 // This assumes ASCENT_LOCKOUT is defined in m/s.
 //                 if slope_mps > ASCENT_LOCKOUT {
@@ -229,7 +229,7 @@ impl RecoveryManager {
 //             // Check if we have enough valid data points for an average.
 //             if datapoints_used >= DATA_POINTS / 2 {
 //                 let avg_slope_mps = avg_sum / (datapoints_used as f32);
-                
+
 //                 // Apogee condition: if the average vertical speed indicates a sufficient descent.
 //                 // This assumes VALID_DESCENT_RATE is a negative value in m/s (e.g., -5.0).
 //                 if avg_slope_mps <= VALID_DESCENT_RATE {
@@ -275,7 +275,7 @@ impl RecoveryManager {
 
 //             if datapoints_used >= DATA_POINTS / 2 {
 //                 let avg_slope_mps = avg_sum / (datapoints_used as f32);
-                
+
 //                 if avg_slope_mps <= VALID_DESCENT_RATE {
 //                     // info!(
 //                     //     "Baro Apogee detected! Average vertical speed: {} m/s",
@@ -287,146 +287,199 @@ impl RecoveryManager {
 //         }
 //     }
 // }
+
+
 #[embassy_executor::task]
 pub async fn recovery_algorithm_task() {
     info!("Barometer reader task started.");
 
     // --- CONFIGURATION CONSTANTS ---
     // The number of consecutive negative slope readings required to confirm descent.
-    const CONSECUTIVE_NEGATIVE_THRESHOLD: usize = 3;
+    const CONSECUTIVE_NEGATIVE_THRESHOLD: usize = 10;
 
     // History buffers to store recent altitude readings from two different sources.
     // Each entry is a tuple of (altitude, timestamp).
-    let mut historical_barometer_altitude_sbg: HistoryBuffer<(f32, Instant), 8> =
+    let mut historical_barometer_altitude_sbg: HistoryBuffer<(f32, Instant), DATA_POINTS> =
         HistoryBuffer::new();
-    let mut historical_barometer_altitude_baro: HistoryBuffer<(f32, Instant), 8> =
+    let mut historical_barometer_altitude_baro: HistoryBuffer<(f32, Instant), DATA_POINTS> =
         HistoryBuffer::new();
 
     loop {
         // Wait for a new pressure reading from the channel.
         let reading: (f32, f32, u8, Instant) = PRESSURE_CHANNEL.receive().await;
-        
+
         // This variable will hold the calculated altitude.
-        let mut altitude = 0.0;
 
         // Process the reading based on its source identifier.
-        if reading.2 == 1 { // Source is the barometer (baro)
+        if reading.2 == 1 {
+            // Source is the barometer (baro)
             // Hypsometric Formula to convert pressure and temperature to altitude.
-            altitude =
+            let altitude =
                 ((powf(101.325 / reading.0, 1.0 / 5.257) - 1.0) * (reading.1 + 273.15)) / 0.0065;
             historical_barometer_altitude_baro.write((altitude, reading.3));
-        } else if reading.2 == 0 { // Source is the SBG
-            altitude = reading.0; // SBG provides altitude directly.
-            info!("Altitude: {}", altitude);
-            historical_barometer_altitude_sbg.write((altitude, reading.3));
-        }
 
-        // --- Apogee Detection Logic ---
-        // Ensure there are enough data points in the buffer to perform a reliable calculation.
-        if historical_barometer_altitude_sbg.len() < 8 {
-            continue;
-        }
+            // --- DEBUG PRINT: Show the current data buffer ---
+            let altitude_history_for_print: Vec<_, DATA_POINTS> = historical_barometer_altitude_baro
+                .oldest_ordered()
+                .map(|(alt, _)| alt)
+                .collect();
+            // info!("[BARO] Altitude History: {:?}", altitude_history_for_print.as_slice());
 
-        // Get an ordered iterator over the historical data.
-        let mut buf_sbg = historical_barometer_altitude_sbg.oldest_ordered();
-        let mut buf_baro = historical_barometer_altitude_baro.oldest_ordered();
 
-        // --- SBG Apogee Check ---
-        if let Some(mut prev_reading) = buf_sbg.next() {
-            // This buffer will store the calculated slopes (max 7 slopes from 8 points).
-            let mut slopes: HistoryBuffer<f32, 7> = HistoryBuffer::new();
+            let mut buf_baro = historical_barometer_altitude_baro.oldest_ordered();
 
-            // First, iterate through the altitude history and calculate the slope between each point.
-            for current_reading in buf_sbg {
-                let time_diff_ms = current_reading.1.duration_since(prev_reading.1).as_millis();
-                if time_diff_ms > 0 {
-                    let slope_mpms = (current_reading.0 - prev_reading.0) / time_diff_ms as f32;
-                    // Optional: Add ascent lockout here if needed
-                    // if slope_mpms > ASCENT_LOCKOUT { continue; }
-                    slopes.write(slope_mpms);
-                }
-                prev_reading = current_reading;
-            }
+            // --- Barometer Apogee Check (Identical logic) ---
+            if let Some(mut prev_reading) = buf_baro.next() {
+                let mut slopes: HistoryBuffer<f32, SLOPES> = HistoryBuffer::new();
 
-            // Ensure we have enough slopes to check for a consecutive sequence.
-            if slopes.len() >= CONSECUTIVE_NEGATIVE_THRESHOLD {
-                // Collect slopes into a vector to easily access the most recent items from the end.
-                // In a `no_std` environment, this would typically be a `heapless::Vec`.
-                let slopes_vec: Vec<_, DATA_POINTS> = slopes.oldest_ordered().collect();
-                let mut consecutive_negative_count = 0;
-                let mut sum_of_recent_slopes = 0.0;
+                for current_reading in buf_baro {
+                    let time_diff_ms = current_reading.1.duration_since(prev_reading.1).as_millis();
+                    let alt_diff = current_reading.0 - prev_reading.0;
 
-                // Check if the last N slopes are all negative by iterating backwards from the end.
-                for slope in slopes_vec.iter().rev().take(CONSECUTIVE_NEGATIVE_THRESHOLD) {
-                    if **slope <= 0.0 {
-                        consecutive_negative_count += 1;
-                        sum_of_recent_slopes += *slope;
-                    } else {
-                        break; // Sequence is broken by a positive slope.
-                    }
-                }
+                    // --- DEBUG PRINT: Show inputs for slope calculation ---
+                    // info!("[BARO] Slope calc: alt_diff={}, time_diff={} ms", alt_diff, time_diff_ms);
 
-                // If we found a consecutive sequence of negative slopes, check for apogee.
-                if consecutive_negative_count == CONSECUTIVE_NEGATIVE_THRESHOLD {
-                    let avg_slope_mpms = sum_of_recent_slopes / CONSECUTIVE_NEGATIVE_THRESHOLD as f32;
-                    
-                    if avg_slope_mpms <= VALID_DESCENT_RATE {
-                        info!(
-                            "SBG Apogee detected! Avg speed of last {} readings: {} m/s",
-                            CONSECUTIVE_NEGATIVE_THRESHOLD,
-                            avg_slope_mpms * 1000.0 // Convert to m/s for logging
-                        );
+                    if time_diff_ms > 0 {
+                        let slope_mpms = alt_diff / time_diff_ms as f32;
                         
-                        if EVENT_CHANNEL.try_send(crate::state_machine::Events::Apogee).is_err() {
-                            todo!("Log failure to radio");
-                        }
-                        break; // Exit loop once apogee is detected.
-                    }
-                }
-            }
-        }
-
-        // --- Barometer Apogee Check (Identical logic) ---
-        if let Some(mut prev_reading) = buf_baro.next() {
-            let mut slopes: HistoryBuffer<f32, 7> = HistoryBuffer::new();
-
-            for current_reading in buf_baro {
-                let time_diff_ms = current_reading.1.duration_since(prev_reading.1).as_millis();
-                if time_diff_ms > 0 {
-                    let slope_mpms = (current_reading.0 - prev_reading.0) / time_diff_ms as f32;
-                    slopes.write(slope_mpms);
-                }
-                prev_reading = current_reading;
-            }
-
-            if slopes.len() >= CONSECUTIVE_NEGATIVE_THRESHOLD {
-                let slopes_vec: Vec<_, DATA_POINTS> = slopes.oldest_ordered().collect();
-                let mut consecutive_negative_count = 0;
-                let mut sum_of_recent_slopes = 0.0;
-
-                for slope in slopes_vec.iter().rev().take(CONSECUTIVE_NEGATIVE_THRESHOLD) {
-                    if **slope <= 0.0 {
-                        consecutive_negative_count += 1;
-                        sum_of_recent_slopes += *slope;
+                        // --- DEBUG PRINT: Show the calculated slope ---
+                        // info!("[BARO]  -> New Slope: {} m/ms ({} m/s)", slope_mpms, slope_mpms * 1000.0);
+                        slopes.write(slope_mpms);
                     } else {
-                        break;
+                         // --- DEBUG PRINT: Indicate when a calculation is skipped ---
+                        // info!("[BARO]  -> Skipping slope calc: time_diff_ms is 0");
                     }
+                    prev_reading = current_reading;
                 }
 
-                if consecutive_negative_count == CONSECUTIVE_NEGATIVE_THRESHOLD {
-                    let avg_slope_mpms = sum_of_recent_slopes / CONSECUTIVE_NEGATIVE_THRESHOLD as f32;
+                if slopes.len() >= CONSECUTIVE_NEGATIVE_THRESHOLD {
+                    let slopes_vec: Vec<_, DATA_POINTS> = slopes.oldest_ordered().collect();
                     
-                    if avg_slope_mpms <= VALID_DESCENT_RATE {
-                        info!(
-                            "Baro Apogee detected! Avg speed of last {} readings: {} m/s",
-                            CONSECUTIVE_NEGATIVE_THRESHOLD,
-                            avg_slope_mpms * 1000.0
-                        );
-                        // Consider sending event or using a voting system with the SBG.
+                    // --- DEBUG PRINT: Show the buffer of slopes being evaluated ---
+                    // info!("[BARO] Slopes buffer for check: {:?}", slopes_vec.as_slice());
+
+                    let mut consecutive_negative_count = 0;
+                    let mut sum_of_recent_slopes = 0.0;
+
+                    for slope in slopes_vec.iter().rev().take(CONSECUTIVE_NEGATIVE_THRESHOLD) {
+                        if **slope <= 0.0 {
+                            consecutive_negative_count += 1;
+                            sum_of_recent_slopes += *slope;
+                        } else {
+                            break;
+                        }
+                    }
+                    
+                    // --- DEBUG PRINT: Show the result of the consecutive check ---
+                    // info!("[BARO] Consecutive negative count: {}", consecutive_negative_count);
+
+
+                    if consecutive_negative_count == CONSECUTIVE_NEGATIVE_THRESHOLD {
+                        let avg_slope_mpms =
+                            sum_of_recent_slopes / CONSECUTIVE_NEGATIVE_THRESHOLD as f32;
+
+                        if avg_slope_mpms <= VALID_DESCENT_RATE {
+                            // info!(
+                            //     "Baro Apogee detected! Avg speed of last {} readings: {} m/s",
+                            //     CONSECUTIVE_NEGATIVE_THRESHOLD,
+                            //     avg_slope_mpms * 1000.0
+                            // );
+                            // Consider sending event or using a voting system with the SBG.
+                        }
+                    }
+                }
+            }
+        } else if reading.2 == 0 {
+            // Source is the SBG
+            let altitude = reading.0; 
+            // info!("Altitude: {}", altitude);
+            historical_barometer_altitude_sbg.write((altitude, reading.3));
+            
+            // --- Apogee Detection Logic ---
+            // Ensure there are enough data points in the buffer to perform a reliable calculation.
+            if historical_barometer_altitude_sbg.len() < DATA_POINTS {
+                continue;
+            }
+
+            // --- DEBUG PRINT: Show the current data buffer ---
+            let altitude_history_for_print: Vec<_, DATA_POINTS> = historical_barometer_altitude_sbg
+                .oldest_ordered()
+                .map(|(alt, _)| alt)
+                .collect();
+            // info!("[SBG] Altitude History: {:?}", altitude_history_for_print.as_slice());
+
+            let mut buf_sbg = historical_barometer_altitude_sbg.oldest_ordered();
+
+            // --- SBG Apogee Check ---
+            if let Some(mut prev_reading) = buf_sbg.next() {
+                let mut slopes: HistoryBuffer<f32, SLOPES> = HistoryBuffer::new();
+
+                for current_reading in buf_sbg {
+                    let time_diff_ms = current_reading.1.duration_since(prev_reading.1).as_millis();
+                    let alt_diff = current_reading.0 - prev_reading.0;
+
+                    // --- DEBUG PRINT: Show inputs for slope calculation ---
+                    // info!("[SBG] Slope calc: alt_diff={}, time_diff={} ms", alt_diff, time_diff_ms);
+
+                    if time_diff_ms > 0 {
+                        let slope_mpms = alt_diff / time_diff_ms as f32;
+                        
+                        // --- DEBUG PRINT: Show the calculated slope ---
+                        // info!("[SBG]  -> New Slope: {} m/ms ({} m/s)", slope_mpms, slope_mpms * 1000.0);
+                        slopes.write(slope_mpms);
+                    } else {
+                        // --- DEBUG PRINT: Indicate when a calculation is skipped ---
+                        // info!("[SBG]  -> Skipping slope calc: time_diff_ms is 0");
+                    }
+                    prev_reading = current_reading;
+                }
+
+                if slopes.len() >= CONSECUTIVE_NEGATIVE_THRESHOLD {
+                    let slopes_vec: Vec<_, DATA_POINTS> = slopes.oldest_ordered().collect();
+
+                    // --- DEBUG PRINT: Show the buffer of slopes being evaluated ---
+                    // info!("[SBG] Slopes buffer for check: {:?}", slopes_vec.as_slice());
+                    
+                    let mut consecutive_negative_count = 0;
+                    let mut sum_of_recent_slopes = 0.0;
+
+                    for slope in slopes_vec.iter().rev().take(CONSECUTIVE_NEGATIVE_THRESHOLD) {
+                        if **slope <= 0.0 {
+                            consecutive_negative_count += 1;
+                            sum_of_recent_slopes += *slope;
+                        } else {
+                            break;
+                        }
+                    }
+
+                    // --- DEBUG PRINT: Show the result of the consecutive check ---
+                    // info!("[SBG] Consecutive negative count: {}", consecutive_negative_count);
+
+
+                    if consecutive_negative_count == CONSECUTIVE_NEGATIVE_THRESHOLD {
+                        let avg_slope_mpms =
+                            sum_of_recent_slopes / CONSECUTIVE_NEGATIVE_THRESHOLD as f32;
+
+                        if avg_slope_mpms <= VALID_DESCENT_RATE {
+                            // info!(
+                            //     "SBG Apogee detected! Avg speed of last {} readings: {} m/s",
+                            //     CONSECUTIVE_NEGATIVE_THRESHOLD,
+                            //     avg_slope_mpms * 1000.0 // Convert to m/s for logging
+                            // );
+
+                            if EVENT_CHANNEL
+                                .try_send(crate::state_machine::Events::Apogee)
+                                .is_err()
+                            {
+                                // todo!("Log failure to radio");
+                            }
+                            break; // Exit loop once apogee is detected.
+                        }
                     }
                 }
             }
         }
-        Timer::after_millis(25).await;
+
+        Timer::after_millis(250).await;
     }
 }

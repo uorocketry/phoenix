@@ -86,7 +86,7 @@ pub async fn sdmmc_task(
             {
                 match file.write(&data) {
                     Err(_) => {
-                        todo!("Log to radio we failed to write.");
+                        // todo!("Log to radio we failed to write.");
                     }
                     _ => {}
                 }

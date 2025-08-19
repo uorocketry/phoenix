@@ -1,3 +1,4 @@
+use defmt::info;
 use embassy_stm32::gpio::{Level, Output, Speed};
 use embassy_stm32::peripherals::{PE12, PE14};
 use embassy_time::Delay;
@@ -12,39 +13,47 @@ pub struct Cameras {
 impl Cameras {
     pub fn new(osd: PE14, power: PE12) -> Self {
         Cameras {
-            osd: Output::new(osd, Level::High, Speed::Low),
-            power: Output::new(power, Level::High, Speed::Low),
+            osd: Output::new(osd, Level::Low, Speed::Low),
+            power: Output::new(power, Level::Low, Speed::Low),
         }
     }
 
     pub fn start_recording(&mut self) {
-        for i in 0..2 {
+        // for i in 0..3 {
             self.osd.set_high();
-            Delay.delay_ms(100);
+        //     Delay.delay_ms(250);
 
-            self.osd.set_low(); 
-            Delay.delay_ms(100); 
-        }
+        //     self.osd.set_low();
+        //     Delay.delay_ms(250);
+        // }
 
-        // OSD is reset, now power on 
-        self.power.set_low(); 
-        Delay.delay_ms(1000);
-        self.power.set_high(); 
+        // Delay.delay_ms(1000);
 
-        Delay.delay_ms(100); 
-        self.power.set_low(); 
-        Delay.delay_ms(100); 
-        self.power.set_high(); 
+        // OSD is reset, now power on
+        self.power.set_high();
+        // Delay.delay_ms(2000);
+        // info!("Camera on");
+        // self.power.set_low();
+
+        // Delay.delay_ms(500);
+
+        // self.power.set_low();
+        // Delay.delay_ms(2000);
+        // self.power.set_high();
+
+        // Delay.delay_ms(1000);
+        // self.power.set_high();
+        // Delay.delay_ms(250);
+        // self.power.set_low();
     }
 
     pub fn stop_recording(&mut self) {
-        self.power.set_low();
-        Delay.delay_ms(100); 
-        self.power.set_high(); 
-        Delay.delay_ms(200);
-        self.power.set_low(); 
-        Delay.delay_ms(1000);
-        self.power.set_high(); 
-
+        // self.power.set_high();
+        // Delay.delay_ms(100);
+        // self.power.set_low();
+        // Delay.delay_ms(200);
+        // self.power.set_high();
+        // Delay.delay_ms(500);
+        // self.power.set_low();
     }
 }
