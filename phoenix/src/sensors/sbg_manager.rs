@@ -63,7 +63,7 @@ pub async fn sbg_receiver_task() {
                     millis_since_start: Instant::now().as_millis(),
                 };
                 msg.encode_length_delimited(&mut buf.as_mut())
-                    .expect("Failed to encode SBG GPS Position");
+                    .expect("Failed to encode");
                 RADIO_CHANNEL.send(buf.clone()).await;
 
                 SD_CHANNEL.send(("sbg.txt", buf)).await;

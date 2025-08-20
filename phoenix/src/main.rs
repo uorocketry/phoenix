@@ -241,7 +241,6 @@ async fn main(spawner: Spawner) {
     // spawner.must_spawn(radio_reader_task(radio_ring_rx));
     spawner.must_spawn(radio_writer_task(radio_tx));
     spawner.must_spawn(sd::sdmmc_task(sd_card));
-    // spawner.must_spawn(recovery::recovery_algorithm_task());
     // spawner.must_spawn(imu_task(imu));
 
     // pass control of the spawner to the state machine

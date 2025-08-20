@@ -148,6 +148,18 @@ pub async fn sm_task(spawner: Spawner, mut state_machine: StateMachine<Context>)
                         EVENT_CHANNEL.send(Events::Launch).await;
                         spawner.must_spawn(recovery_algorithm_task());
                         recovery_spawned = true; 
+
+                        let msg = messages_prost::radio::RadioFrame {
+                            node: messages_prost::common::Node::Phoenix.into(),
+                            payload: Some(messages_prost::radio::radio_frame::Payload::PhoenixEvent(
+                                Event::Launch.into(),
+                            )),
+                            millis_since_start: Instant::now().as_millis(),
+                        };
+
+                        msg.encode_length_delimited(&mut buf.as_mut()).unwrap();
+                        RADIO_CHANNEL.send(buf.clone()).await;
+                        SD_CHANNEL.send(("event.txt", buf)).await;
                     }
                 }
 
