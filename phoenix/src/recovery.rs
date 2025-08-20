@@ -295,7 +295,7 @@ pub async fn recovery_algorithm_task() {
 
     // --- CONFIGURATION CONSTANTS ---
     // The number of consecutive negative slope readings required to confirm descent.
-    const CONSECUTIVE_NEGATIVE_THRESHOLD: usize = 10;
+    const CONSECUTIVE_NEGATIVE_THRESHOLD: usize = 5;
 
     // History buffers to store recent altitude readings from two different sources.
     // Each entry is a tuple of (altitude, timestamp).
@@ -406,7 +406,7 @@ pub async fn recovery_algorithm_task() {
                 .oldest_ordered()
                 .map(|(alt, _)| alt)
                 .collect();
-            // info!("[SBG] Altitude History: {:?}", altitude_history_for_print.as_slice());
+            info!("[SBG] Altitude History: {:?}", altitude_history_for_print.as_slice());
 
             let mut buf_sbg = historical_barometer_altitude_sbg.oldest_ordered();
 
@@ -461,11 +461,11 @@ pub async fn recovery_algorithm_task() {
                             sum_of_recent_slopes / CONSECUTIVE_NEGATIVE_THRESHOLD as f32;
 
                         if avg_slope_mpms <= VALID_DESCENT_RATE {
-                            // info!(
-                            //     "SBG Apogee detected! Avg speed of last {} readings: {} m/s",
-                            //     CONSECUTIVE_NEGATIVE_THRESHOLD,
-                            //     avg_slope_mpms * 1000.0 // Convert to m/s for logging
-                            // );
+                            info!(
+                                "SBG Apogee detected! Avg speed of last {} readings: {} m/s",
+                                CONSECUTIVE_NEGATIVE_THRESHOLD,
+                                avg_slope_mpms// Convert to m/s for logging
+                            );
 
                             if EVENT_CHANNEL
                                 .try_send(crate::state_machine::Events::Apogee)
@@ -480,6 +480,7 @@ pub async fn recovery_algorithm_task() {
             }
         }
 
-        Timer::after_millis(250).await;
+        Timer::after_millis(100).await;
     }
+    info!("Recovery task ended");
 }

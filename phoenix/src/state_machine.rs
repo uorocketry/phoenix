@@ -51,8 +51,8 @@ pub async fn sm_task(spawner: Spawner, mut state_machine: StateMachine<Context>)
     let mut recovery_spawned = false; 
     let mut historical_barometer_altitude_sbg: HistoryBuffer<(f32, Instant), DATA_POINTS> =
         HistoryBuffer::new();
-    const CONSECUTIVE_NEGATIVE_THRESHOLD: usize = 10;
-    const NO_MOVEMENT_RATE: f32 = 0.0001;
+    const CONSECUTIVE_NEGATIVE_THRESHOLD: usize = 7;
+    const NO_MOVEMENT_RATE: f32 = -0.0001;
 
     loop {
         if let Ok(event) = EVENT_CHANNEL.try_receive() {
@@ -61,6 +61,7 @@ pub async fn sm_task(spawner: Spawner, mut state_machine: StateMachine<Context>)
 
         match state_machine.state {
             States::Ascent => {
+                info!("Ascent");
                 let mut buf: [u8; 255] = [0; 255];
 
                 let msg = messages_prost::radio::RadioFrame {
@@ -145,6 +146,7 @@ pub async fn sm_task(spawner: Spawner, mut state_machine: StateMachine<Context>)
                 // sbg data
                 if sender == 0 && !recovery_spawned {
                     if altitude >= crate::recovery::HEIGHT_MIN {
+                        info!("Height lockout reached");
                         EVENT_CHANNEL.send(Events::Launch).await;
                         spawner.must_spawn(recovery_algorithm_task());
                         recovery_spawned = true; 
@@ -290,7 +292,6 @@ pub async fn sm_task(spawner: Spawner, mut state_machine: StateMachine<Context>)
 
                 if sender == 0 {
                     // Source is the SBG
-                    info!("Altitude: {}", altitude);
                     historical_barometer_altitude_sbg.write((altitude, timestamp));
                     
                     // --- Apogee Detection Logic ---
@@ -316,18 +317,12 @@ pub async fn sm_task(spawner: Spawner, mut state_machine: StateMachine<Context>)
                             let time_diff_ms = current_reading.1.duration_since(prev_reading.1).as_millis();
                             let alt_diff = current_reading.0 - prev_reading.0;
 
-                            // --- DEBUG PRINT: Show inputs for slope calculation ---
-                            info!("[SBG] Slope calc: alt_diff={}, time_diff={} ms", alt_diff, time_diff_ms);
 
                             if time_diff_ms > 0 {
                                 let slope_mpms = alt_diff / time_diff_ms as f32;
                                 
-                                // --- DEBUG PRINT: Show the calculated slope ---
-                                info!("[SBG]  -> New Slope: {} m/ms ({} m/s)", slope_mpms, slope_mpms * 1000.0);
                                 slopes.write(slope_mpms);
                             } else {
-                                // --- DEBUG PRINT: Indicate when a calculation is skipped ---
-                                info!("[SBG]  -> Skipping slope calc: time_diff_ms is 0");
                             }
                             prev_reading = current_reading;
                         }
@@ -335,29 +330,23 @@ pub async fn sm_task(spawner: Spawner, mut state_machine: StateMachine<Context>)
                         if slopes.len() >= CONSECUTIVE_NEGATIVE_THRESHOLD {
                             let slopes_vec: Vec<_, DATA_POINTS> = slopes.oldest_ordered().collect();
 
-                            // --- DEBUG PRINT: Show the buffer of slopes being evaluated ---
-                            info!("[SBG] Slopes buffer for check: {:?}", slopes_vec.as_slice());
                             
-                            let mut consecutive_negative_count = 0;
                             let mut sum_of_recent_slopes = 0.0;
 
                             for slope in slopes_vec.iter().rev().take(CONSECUTIVE_NEGATIVE_THRESHOLD) {
                                 if **slope <= 0.0 {
-                                    consecutive_negative_count += 1;
                                     sum_of_recent_slopes += *slope;
                                 } else {
                                     break;
                                 }
                             }
 
-                            // --- DEBUG PRINT: Show the result of the consecutive check ---
-                            info!("[SBG] Consecutive negative count: {}", consecutive_negative_count);
 
 
-                            if consecutive_negative_count == CONSECUTIVE_NEGATIVE_THRESHOLD {
                                 let avg_slope_mpms =
                                     sum_of_recent_slopes / CONSECUTIVE_NEGATIVE_THRESHOLD as f32;
 
+                                info!("slope: {}", avg_slope_mpms);
                                 if avg_slope_mpms <= NO_MOVEMENT_RATE {
                                     let msg = messages_prost::radio::RadioFrame {
                                         node: messages_prost::common::Node::Phoenix.into(),
@@ -377,10 +366,8 @@ pub async fn sm_task(spawner: Spawner, mut state_machine: StateMachine<Context>)
                                     {
                                         // todo!("Log failure to radio");
                                     }
-                                    break; // Exit loop once apogee is detected.
                                 }
                             }
-                        }
                     }
                 }
             }
