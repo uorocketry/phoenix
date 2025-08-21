@@ -406,7 +406,7 @@ pub async fn recovery_algorithm_task() {
                 .oldest_ordered()
                 .map(|(alt, _)| alt)
                 .collect();
-            info!("[SBG] Altitude History: {:?}", altitude_history_for_print.as_slice());
+            // info!("[SBG] Altitude History: {:?}", altitude_history_for_print.as_slice());
 
             let mut buf_sbg = historical_barometer_altitude_sbg.oldest_ordered();
 
@@ -461,11 +461,11 @@ pub async fn recovery_algorithm_task() {
                             sum_of_recent_slopes / CONSECUTIVE_NEGATIVE_THRESHOLD as f32;
 
                         if avg_slope_mpms <= VALID_DESCENT_RATE {
-                            info!(
-                                "SBG Apogee detected! Avg speed of last {} readings: {} m/s",
-                                CONSECUTIVE_NEGATIVE_THRESHOLD,
-                                avg_slope_mpms// Convert to m/s for logging
-                            );
+                            // info!(
+                            //     "SBG Apogee detected! Avg speed of last {} readings: {} m/s",
+                            //     CONSECUTIVE_NEGATIVE_THRESHOLD,
+                            //     avg_slope_mpms// Convert to m/s for logging
+                            // );
 
                             if EVENT_CHANNEL
                                 .try_send(crate::state_machine::Events::Apogee)

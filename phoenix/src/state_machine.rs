@@ -61,7 +61,6 @@ pub async fn sm_task(spawner: Spawner, mut state_machine: StateMachine<Context>)
 
         match state_machine.state {
             States::Ascent => {
-                info!("Ascent");
                 let mut buf: [u8; 255] = [0; 255];
 
                 let msg = messages_prost::radio::RadioFrame {
@@ -305,7 +304,7 @@ pub async fn sm_task(spawner: Spawner, mut state_machine: StateMachine<Context>)
                         .oldest_ordered()
                         .map(|(alt, _)| alt)
                         .collect();
-                    info!("[SBG] Altitude History: {:?}", altitude_history_for_print.as_slice());
+                    // info!("[SBG] Altitude History: {:?}", altitude_history_for_print.as_slice());
 
                     let mut buf_sbg = historical_barometer_altitude_sbg.oldest_ordered();
 
@@ -346,7 +345,7 @@ pub async fn sm_task(spawner: Spawner, mut state_machine: StateMachine<Context>)
                                 let avg_slope_mpms =
                                     sum_of_recent_slopes / CONSECUTIVE_NEGATIVE_THRESHOLD as f32;
 
-                                info!("slope: {}", avg_slope_mpms);
+                                // info!("slope: {}", avg_slope_mpms);
                                 if avg_slope_mpms <= NO_MOVEMENT_RATE {
                                     let msg = messages_prost::radio::RadioFrame {
                                         node: messages_prost::common::Node::Phoenix.into(),
