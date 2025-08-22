@@ -3,7 +3,7 @@ use embassy_stm32::gpio::{Input, Level, Output, Pull, Speed};
 use embassy_stm32::peripherals::{
     ADC1, PA2, PA3, PB0, PC1, PC11, PC12, PC5, PD1, PD13, PD14, PD2, PD5, PD6,
 };
-use embassy_time::{Duration, Instant, Timer};
+use embassy_time::{Instant, Timer};
 use embedded_hal_1::delay::DelayNs;
 use embedded_hal_1::digital::OutputPin;
 use heapless::{HistoryBuffer, Vec};

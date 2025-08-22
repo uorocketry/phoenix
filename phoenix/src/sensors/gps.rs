@@ -139,21 +139,18 @@
 //     }
 // }
 
-use crate::resources::{Irqs, GPS_BUFFER_SIZE, RADIO_CHANNEL, RX_GPS_BUF, SD_CHANNEL};
+use crate::resources::{GPS_BUFFER_SIZE, RX_GPS_BUF};
 use defmt::info;
 use embassy_stm32::gpio::{Level, Output, Speed};
 use embassy_stm32::mode;
 use embassy_stm32::peripherals::{DMA1_CH5, DMA1_CH6, PA4, PB2, PE0, PE1, UART8};
 use embassy_stm32::usart::{Config, RingBufferedUartRx, Uart, UartTx};
-use embassy_time::{Delay, Instant};
+use embassy_time::Delay;
 use embedded_hal_1::delay::DelayNs;
-use messages_prost::gps::Gps;
-use messages_prost::prost::Message;
-use ublox::cfg_val::{CfgKey, CfgVal};
-use ublox::nav_pvt_proto14::NavPvt;
+use ublox::cfg_val::CfgVal;
 use ublox::PacketRef;
 use ublox::{
-    CfgLayerSet, CfgRstBuilder, CfgValSetBuilder, NavBbrMask, ResetMode, UbxPacketRequest,
+    CfgLayerSet, CfgRstBuilder, CfgValSetBuilder, NavBbrMask, ResetMode,
 };
 
 /// #

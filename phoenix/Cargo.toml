@@ -14,7 +14,6 @@ smlang = { workspace = true }
 #rtic-monotonics = { workspace = true }
 common-arm = { path = "../crates/common-arm" }
 defmt = { workspace = true}
-fdcan = { workspace = true }
 embedded-alloc = {workspace = true}
 heapless = {workspace = true}
 #rtic-sync = { workspace = true }

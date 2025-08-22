@@ -19,18 +19,14 @@ use core::cell::RefCell;
 
 use defmt::*;
 use embassy_executor::Spawner;
-use embassy_stm32::gpio::{Input, Level, Output, OutputType, Pull, Speed};
+use embassy_stm32::gpio::{Level, Output, OutputType, Speed};
 use embassy_stm32::spi::{Config as SpiConfig, Spi};
 use embassy_stm32::time::{khz, mhz};
 use embassy_stm32::timer::simple_pwm::{PwmPin, SimplePwm};
 use embassy_stm32::usart::{Config as UartConfig, Uart};
-use embassy_stm32::wdg::IndependentWatchdog;
-use embassy_stm32::{mode, peripherals};
-use embassy_time::{Delay, Duration, Instant, Timer};
-use embedded_hal_1::delay::DelayNs;
+use embassy_stm32::mode;
+use embassy_time::{Delay, Duration, Timer};
 use embedded_hal_bus::spi::RefCellDevice;
-use messages_prost::phoenix_state::Event;
-use messages_prost::prost::Message;
 use static_cell::StaticCell;
 // use embedded_alloc::Heap;
 use crate::state_machine::StateMachine;
@@ -41,11 +37,10 @@ use common_arm::drivers::ms5611::Ms5611;
 
 // Use the asynchronous SpiDevice from embassy-embedded-hal
 
-use crate::camera::Cameras;
-use crate::communication::{radio_reader_task, radio_writer_task};
+use crate::communication::radio_writer_task;
 use crate::recovery::RecoveryManager;
 use crate::resources::{
-    Irqs, EVENT_CHANNEL, HEAP, RADIO_CHANNEL, RECOVERY_MANAGER, RX_SBG_BUF, SD_CHANNEL,
+    Irqs, HEAP, RECOVERY_MANAGER, RX_SBG_BUF,
 };
 
 pub static IMU_BUS_CELL: StaticCell<RefCell<Spi<mode::Blocking>>> = StaticCell::new();
@@ -191,7 +186,7 @@ async fn main(spawner: Spawner) {
     .await;
 
     // --- Recovery manager ---
-    let mut recovery_manager = RecoveryManager::new(
+    let recovery_manager = RecoveryManager::new(
         p.PD6, p.PD14, p.PC11, p.PD2, p.PD5, p.PD13, p.PC12, p.PD1, p.PA2, p.PB0, p.PA3, p.PC5,
         p.ADC1, p.PC1,
     );

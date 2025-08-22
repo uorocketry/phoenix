@@ -1,8 +1,5 @@
-use defmt::info;
 use embassy_stm32::gpio::{Level, Output, Speed};
 use embassy_stm32::peripherals::{PE12, PE14};
-use embassy_time::Delay;
-use embedded_hal_1::delay::DelayNs;
 use embedded_hal_1::digital::OutputPin;
 
 pub struct Cameras {

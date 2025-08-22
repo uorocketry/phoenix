@@ -119,7 +119,7 @@ where
     /// Reads a 16-bit value from a register using the byte-oriented protocol.
     fn read_reg(&mut self, reg: u8) -> Result<u16, Error<SPI::Error>> {
         let mut tx_buf = [0u8; 4];
-        tx_buf[0] = ((reg & 0x1F) << 2); // RW=0, Addr in bits 6..2
+        tx_buf[0] = (reg & 0x1F) << 2; // RW=0, Addr in bits 6..2
         tx_buf[1] = 0;
         tx_buf[2] = 0;
         tx_buf[3] = self.calculate_crc(&[tx_buf[0], tx_buf[1], tx_buf[2]]);
