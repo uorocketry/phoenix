@@ -1,13 +1,12 @@
 // use atsamd_hal::dmac;
 use core::convert::Infallible;
-use defmt::{write, Format};
+use defmt::write;
 use derive_more::From;
-use embedded_sdmmc as sd;
-use messages::ErrorContext;
 use nb::Error as NbError;
 
 use crate::drivers::ms5611;
 /// Open up atsamd hal errors without including the whole crate.
+use messages_prost::common::ErrorContext;
 
 /// Contains all the various error types that can be encountered in the Hydra codebase. Extra errors
 /// types should be added to this list whenever needed.
@@ -19,13 +18,9 @@ pub enum HydraErrorType {
     PostcardError(postcard::Error),
     /// Error that occurred while spawning an RTIC task. Contains the name of the failed task.
     SpawnError(&'static str),
-    /// Error from the SD card library.
-    SdCardError(sd::Error<sd::SdMmcError>),
-    /// Error from the Baro driver.
-    BaroError(ms5611::Error<stm32h7xx_hal::spi::Error, core::convert::Infallible>),
     /// Error from the Mavlink library.
-    MavlinkError(messages::mavlink::error::MessageWriteError),
-    MavlinkReadError(messages::mavlink::error::MessageReadError),
+    MavlinkError(messages_prost::mavlink::error::MessageWriteError),
+    MavlinkReadError(messages_prost::mavlink::error::MessageReadError),
     NbError(NbError<Infallible>),
 }
 
@@ -41,9 +36,6 @@ impl defmt::Format for HydraErrorType {
             HydraErrorType::SpawnError(e) => {
                 write!(f, "Could not spawn task '{}'", e);
             }
-            HydraErrorType::SdCardError(_) => {
-                write!(f, "SD card error!");
-            }
             HydraErrorType::MavlinkError(_) => {
                 write!(f, "Mavlink error!");
             }
@@ -53,16 +45,12 @@ impl defmt::Format for HydraErrorType {
             HydraErrorType::NbError(_) => {
                 write!(f, "Nb error!");
             }
-            HydraErrorType::BaroError(_) => {
-                write!(f, "Baro error!");
-            }
         }
     }
 }
 
 /// Standard HYDRA error. This type should be used as the return type for most functions that can
 /// fail and that returns a `Result`.
-#[derive(Format)]
 pub struct HydraError {
     error: HydraErrorType,
     context: Option<ErrorContext>,

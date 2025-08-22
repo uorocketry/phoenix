@@ -1,16 +1,11 @@
 [workspace]
 resolver = "2"
 
-members = ["phoenix", "examples/*", "crates/*"]
+members = ["phoenix", "crates/*"]
 
 # Specify which members to build by default. Some libraries, such as messages, contain dev-dependencies that will give
 # compile errors if built directly.
-default-members = ["phoenix", "examples/*"]
-
-[workspace.dependencies.stm32h7xx-hal]
-git = "https://github.com/uorocketry/stm32h7xx-hal"
-# We use 35 even though we have the 33. 
-features = ["defmt", "rt", "stm32h735", "can", "rtc"]
+default-members = ["phoenix"]
 
 [workspace.dependencies.serde]
 version = "1.0.150"
@@ -19,13 +14,13 @@ features = ["derive"]
 
 [workspace.dependencies.cortex-m]
 version = "0.7.6"
-features = ["critical-section-single-core"]
+features = ["inline-asm", "critical-section-single-core"]
 
 [workspace.dependencies.cortex-m-rt]
 version = "0.7.1"
 
 [workspace.dependencies.embedded-hal]
-version = "0.2.7"
+version = "1.0.0"
 
 [workspace.dependencies.nb]
 version = "1.1.0"
@@ -38,9 +33,6 @@ features = ["thumbv7-backend"]
 version = "2.0.2"
 features = ["cortex-m-systick", "stm32h733vg"]
 
-[workspace.dependencies.postcard] 
-version = "1.0.2"
-
 [workspace.dependencies.rtic-sync]
 version = "1.3.0"
 
@@ -51,27 +43,58 @@ features = ["print-defmt"]
 [workspace.dependencies.defmt] 
 version = "0.3.2"
 
-[workspace.dependencies.fdcan]
-version = "0.2"
-
 [workspace.dependencies.defmt-rtt]
 version = "0.4"
 
 [workspace.dependencies.chrono]
-git = "https://github.com/uorocketry/chrono"
+#git = "https://github.com/uorocketry/chrono"
+version = "0.4.41"
 default-features = false
 
 [workspace.dependencies.heapless]
-version = "0.7.16"
+version = "0.8"
+default-features = false
+
+[workspace.dependencies.smlang]
+version = "0.8.0"
 
 [workspace.dependencies.embedded-alloc]
-version = "0.5.0"
+version = "0.6.0"
 
-[workspace.dependencies.messages]
-git = "https://github.com/uorocketry/messages"
+[workspace.dependencies.messages-prost]
+git = "https://github.com/uorocketry/messages-prost"
 
 [workspace.dependencies.defmt-test]
 version = "0.3.2"
 
 [workspace.dependencies.madgwick]
 version = "0.1.1"
+
+[workspace.dependencies.prost]
+version = "0.14.1"
+default-features = false
+features = ["derive"] 
+
+[workspace.dependencies.prost-types]
+version = "0.14.1" 
+default-features = false 
+
+[profile.dev.package.sbg-rs]
+opt-level = 0
+debug = true
+
+[profile.release.package.sbg-rs]
+debug = true
+opt-level = 0
+
+[profile.release.build-override]
+opt-level = 0
+
+[profile.release]
+codegen-units = 1
+debug = 2
+debug-assertions = false 
+incremental = false
+# lto = 'thin'
+opt-level = 3            
+overflow-checks = false  

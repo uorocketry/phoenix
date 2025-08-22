@@ -19,5 +19,20 @@
                 }
             ]
         },
+        {
+            "type": "probe-rs-debug",
+            "request": "launch",
+            "name": "Probe-rs Release",
+            "preLaunchTask": "build-release",
+            "flashingConfig": {
+                "flashingEnabled": true
+            },
+            "chip": "STM32H733VGTx",
+            "coreConfigs": [
+                {
+                    "programBinary": "${workspaceFolder}/target/thumbv7em-none-eabihf/release/phoenix",
+                }
+            ]
+        }
     ]
 }
